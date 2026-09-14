@@ -1,0 +1,10 @@
+services:
+  notes:
+    build: .
+    # Feste Portzuordnung: erreichbar unter http://<server>:3000
+    ports:
+      - "3000:80"
+    restart: unless-stopped
+    # Kein Volume, keine Datenbank, kein Backend: die App laeuft vollstaendig
+    # im Browser, und die Notizen liegen in der IndexedDB des jeweiligen
+    # Geraets. Der Container liefert nur statische Dateien aus.

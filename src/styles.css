@@ -1,0 +1,456 @@
+/*
+ * Bewusst schlicht gehalten: kein Design-System, nur so viel Layout, dass die
+ * Bedienung eindeutig ist. Die interessanten Zeilen sind die zu touch-action
+ * und pointer-events – die entscheiden mit darueber, ob Stift und Finger sich
+ * so verhalten wie gewollt.
+ */
+
+:root {
+  --bg: #f2f2f4;
+  --panel: #ffffff;
+  --border: #d8d8de;
+  --text: #1d1d20;
+  --muted: #6c6c78;
+  --accent: #2f6fdd;
+
+  color-scheme: light;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  color: var(--text);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  /* Verhindert die Gummiband-Bewegung beim Ueberscrollen – die fuehlt sich
+     beim Schreiben wie ein Fehler an. */
+  overscroll-behavior: none;
+}
+
+.boot-screen {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--muted);
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.app-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Toolbar
+   -------------------------------------------------------------------------- */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 18px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.toolbar-title {
+  flex: 1 1 240px;
+  /* Nicht weiter zusammenquetschen lassen – sonst schiebt sich der
+     Speicherhinweis unter die naechste Gruppe. Lieber bricht die Toolbar um. */
+  min-width: 240px;
+  gap: 8px;
+}
+
+.toolbar-files {
+  margin-left: auto;
+}
+
+.group-label {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 2px;
+}
+
+.toolbar button {
+  min-width: 30px;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.toolbar button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.toolbar button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.title-input {
+  flex: 1;
+  /* Ohne min-width:0 schrumpft ein <input> nie unter seine Standardbreite
+     (~20 Zeichen) und schiebt sich dann ueber die naechste Gruppe. */
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 15px;
+  font-weight: 600;
+  color: inherit;
+}
+
+.title-input:hover,
+.title-input:focus {
+  border-color: var(--border);
+  background: #fff;
+  outline: none;
+}
+
+.save-state {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.save-state-error {
+  color: #c0392b;
+}
+
+.swatches {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.swatch {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.swatch.active {
+  border-color: var(--text);
+}
+
+.swatch-custom {
+  background: none;
+  border: 1px solid var(--border);
+}
+
+.width-button {
+  display: grid;
+  place-items: center;
+}
+
+.width-dot {
+  display: block;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.zoom-value {
+  min-width: 44px;
+  text-align: center;
+  color: var(--muted);
+}
+
+/* --------------------------------------------------------------------------
+   Arbeitsbereich und Seiten
+   -------------------------------------------------------------------------- */
+
+.workspace {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.page-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 28px;
+  padding: 28px 16px 80px;
+}
+
+.page-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.page {
+  position: relative;
+  background: #fff;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 12%);
+  overflow: hidden;
+
+  /*
+   * Standard: der Finger darf vertikal scrollen. Sobald ein Stift in der Naehe
+   * ist, schaltet .pen-active auf "none" – sonst wuerde die erste
+   * Stiftbewegung die Seite wegschieben statt zu zeichnen. Nur ueber
+   * touch-action laesst sich das Scrollen verhindern; preventDefault() auf
+   * pointerdown reicht dafuer laut Spezifikation ausdruecklich nicht.
+   */
+  touch-action: pan-y;
+}
+
+.page.focused {
+  box-shadow: 0 1px 4px rgb(0 0 0 / 12%), 0 0 0 2px rgb(47 111 221 / 35%);
+}
+
+.workspace.pen-active .page {
+  touch-action: none;
+}
+
+/*
+ * Waehrend der Stift arbeitet, ist der Text-Layer fuer Zeiger unsichtbar.
+ * Das haelt zwei Dinge auf einmal fern: die Cursor-Positionierung durch die
+ * Stiftspitze und Chromes Stift-Handschrifterkennung, die sonst ueber
+ * contenteditable-Feldern anspringt und aus Gekritzel Text machen will.
+ */
+.workspace.pen-active .text-layer {
+  pointer-events: none;
+}
+
+.text-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+}
+
+.text-layer-content {
+  min-height: 100%;
+  outline: none;
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.text-layer-content > * {
+  margin: 0 0 0.75em;
+}
+
+.text-layer-content h1 {
+  font-size: 1.9em;
+}
+
+.text-layer-content h2 {
+  font-size: 1.5em;
+}
+
+.text-layer-content p:empty::after {
+  content: '';
+  display: inline-block;
+}
+
+/*
+ * Die Ink-Canvases liegen deckungsgleich ueber dem Text. Sie fangen selbst
+ * keine Zeiger ab – die Pointer-Listener haengen am Seitencontainer, damit
+ * eine einzige Stelle entscheidet, was mit einem Event passiert.
+ */
+.ink-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.wet-layer {
+  z-index: 900;
+}
+
+.page-label {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.add-page {
+  margin-top: 4px;
+  padding: 10px 22px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.add-page:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* --------------------------------------------------------------------------
+   Ebenen-Panel
+   -------------------------------------------------------------------------- */
+
+.layer-panel {
+  width: 260px;
+  flex-shrink: 0;
+  padding: 14px;
+  overflow-y: auto;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+}
+
+.panel-section + .panel-section {
+  margin-top: 22px;
+}
+
+.panel-section h2 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.panel-row {
+  display: flex;
+  gap: 6px;
+}
+
+.layer-panel button {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.layer-panel button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.layer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.layer-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+}
+
+.layer-item.active {
+  border-color: var(--accent);
+  background: rgb(47 111 221 / 7%);
+}
+
+.layer-visibility {
+  border: none !important;
+  background: none !important;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.layer-name {
+  flex: 1;
+  text-align: left;
+  border: none !important;
+  background: none !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-name-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.layer-hint {
+  color: var(--muted);
+}
+
+.layer-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.layer-actions button {
+  padding: 3px 5px;
+}
+
+.add-layer {
+  margin-top: 8px;
+  width: 100%;
+}
+
+.panel-warning {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: #9a6b1f;
+}
+
+.panel-help {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.panel-help ul {
+  margin: 0;
+  padding-left: 16px;
+  line-height: 1.6;
+}
+
+@media (max-width: 820px) {
+  .layer-panel {
+    width: 210px;
+  }
+}
