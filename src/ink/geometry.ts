@@ -52,3 +52,19 @@ export function boundsOf(points: readonly StrokePoint[], padding = 0): Bounds | 
 export function rectsOverlap(a: Bounds, b: Bounds): boolean {
   return a.minX <= b.maxX && a.maxX >= b.minX && a.minY <= b.maxY && a.maxY >= b.minY;
 }
+
+/** Umschliessendes Rechteck ueber mehrere Rechtecke, oder null bei einer leeren Liste. */
+export function unionOfBounds(rects: readonly Bounds[]): Bounds | null {
+  if (rects.length === 0) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const rect of rects) {
+    if (rect.minX < minX) minX = rect.minX;
+    if (rect.minY < minY) minY = rect.minY;
+    if (rect.maxX > maxX) maxX = rect.maxX;
+    if (rect.maxY > maxY) maxY = rect.maxY;
+  }
+  return { minX, minY, maxX, maxY };
+}

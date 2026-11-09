@@ -128,8 +128,14 @@ export class WorkspaceStore {
    * `rename` auf Ordner-Ebene – der Dateninhalt wird nicht angefasst, nur
    * die Position im Baum. newX/newY werden direkt im Manifest der
    * verschobenen Insel aktualisiert (Rand-Anker-Position beim neuen Eltern).
+   *
+   * Gibt den NEUEN ETag zurueck (siehe api.ts): move() schreibt die Insel
+   * intern neu (wegen x/y), ein Client, der seinen alten ETag weiter
+   * benutzt, wuerde beim naechsten eigenen PUT faelschlich einen 409-Konflikt
+   * bekommen, obwohl niemand sonst etwas geaendert hat – also muss der neue
+   * ETag zurueck zum Aufrufer.
    */
-  async move(idPath: string[], newParentIdPath: string[], newX: number, newY: number): Promise<void> {
+  async move(idPath: string[], newParentIdPath: string[], newX: number, newY: number): Promise<string> {
     if (idPath.length === 0) throw new InvalidOperationError('Die Wurzel-Insel kann nicht verschoben werden.');
 
     // Verhindert, dass eine Insel in einen ihrer eigenen Nachfahren verschoben
@@ -149,7 +155,7 @@ export class WorkspaceStore {
 
     const newIdPath = [...newParentIdPath, id];
     const { manifest, etag } = await this.read(newIdPath);
-    await this.write(newIdPath, { ...manifest, x: newX, y: newY }, etag);
+    return this.write(newIdPath, { ...manifest, x: newX, y: newY }, etag);
   }
 
   /**

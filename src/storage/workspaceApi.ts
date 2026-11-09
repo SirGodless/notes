@@ -78,16 +78,29 @@ export async function putIsland(
   return response.headers.get('ETag') ?? '';
 }
 
-export async function moveIsland(idPath: IdPath, newParentIdPath: IdPath, x: number, y: number): Promise<void> {
+/**
+ * Gibt den NEUEN ETag der verschobenen Insel zurueck – move() schreibt sie
+ * serverseitig neu (wegen x/y), ein Aufrufer, der weiter den ALTEN ETag
+ * benutzt, wuerde beim naechsten eigenen PUT faelschlich einen 409-Konflikt
+ * bekommen (siehe SeaView.finishIslandDrag/undo).
+ */
+export async function moveIsland(idPath: IdPath, newParentIdPath: IdPath, x: number, y: number): Promise<string> {
   const response = await fetch(`${islandUrl(idPath)}/move`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ newParentIdPath, x, y }),
   });
   if (!response.ok) throw new Error(`Insel konnte nicht verschoben werden: ${response.status}`);
+  return response.headers.get('ETag') ?? '';
 }
 
 export async function flagIslandForDeletion(idPath: IdPath): Promise<void> {
   const response = await fetch(`${islandUrl(idPath)}/flag-delete`, { method: 'POST' });
   if (!response.ok) throw new Error(`Insel konnte nicht geflaggt werden: ${response.status}`);
+}
+
+/** Macht flagIslandForDeletion rueckgaengig (Stage E: Merge per Strg+Z zuruecknehmen). */
+export async function unflagIslandForDeletion(idPath: IdPath): Promise<void> {
+  const response = await fetch(`${islandUrl(idPath)}/unflag-delete`, { method: 'POST' });
+  if (!response.ok) throw new Error(`Insel-Flag konnte nicht entfernt werden: ${response.status}`);
 }

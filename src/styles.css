@@ -584,6 +584,16 @@ body {
   font-size: 12px;
   color: var(--muted);
   white-space: nowrap;
+  /* Stage E: Drag-Griff zum Verschieben/Verschmelzen/Verschachteln der Insel
+     (siehe SeaView.handleSceneDown) – deshalb ein eigener Cursor als Hinweis. */
+  cursor: move;
+  user-select: none;
+}
+
+/* Stage E: Miniatur statt Kacheln/Text, wenn die Insel auf dem Bildschirm
+   sehr klein ist (siehe scene/thumbnailCache.ts, IslandView THUMBNAIL_THRESHOLD_PX). */
+.island-thumbnail {
+  image-rendering: pixelated;
 }
 
 .island-layer-tiles {

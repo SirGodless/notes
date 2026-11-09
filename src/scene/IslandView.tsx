@@ -1,23 +1,26 @@
-import { memo, useEffect, useRef } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 
 import { PAGE_HEIGHT, PAGE_WIDTH } from '../config';
 import { useNearViewport } from '../hooks/useNearViewport';
 import type { Bounds } from '../ink/geometry';
-import type { PointerRouter } from '../ink/pointerRouter';
 import { prepareCanvas } from '../ink/renderer';
-import { createTextBox, type IslandManifest, type TextBox } from '../model/island';
-import type { InkLayer, Stroke, TextDoc } from '../model/types';
+import { createTextBox, type IslandManifest } from '../model/island';
+import type { InkLayer } from '../model/types';
 import { loopsToSvgPath } from './coastline';
 import { IslandInkController, type IslandInkHost } from './IslandInkController';
 import type { IslandHitNode } from './ownership';
 import { useScene } from './SceneContext';
-import type { SceneToolState } from './sceneToolState';
 import { TextBoxView } from './TextBoxView';
+import { renderThumbnail } from './thumbnailCache';
 import { TileGrid } from './TileGrid';
 import { useCoastline } from './useCoastline';
 
 /** Rand um den Viewport, in dem Inseln schon Kacheln bekommen, bevor sie ganz sichtbar sind. */
 const MOUNT_MARGIN_PX = 600;
+/** Unterschreitet eine Insel auf dem Bildschirm diese Kantenlaenge, wird aus der Miniatur geblittet (siehe Plan). */
+const THUMBNAIL_THRESHOLD_PX = 300;
+/** Debounce fuer die Miniatur-Neuberechnung, analog useCoastline. */
+const THUMBNAIL_RECOMPUTE_DEBOUNCE_MS = 400;
 
 interface IslandViewProps {
   /**
@@ -26,14 +29,6 @@ interface IslandViewProps {
    * Felder wie z/coastlineDirty/thumbnailStale nicht verloren gehen.
    */
   island: IslandManifest;
-  toolRef: React.RefObject<SceneToolState>;
-  router: PointerRouter;
-  onStrokeCommitted: (layerId: string, stroke: Stroke) => void;
-  /** Wird bei jedem gewonnenen pointerdown gerufen – hebt die Insel per z nach oben. */
-  onTouched: () => void;
-  /** Eine neue Textbox ist auf dieser Insel entstanden (Klick in offenes Wasser INNERHALB der Insel). */
-  onCreateTextBox: (textBox: TextBox) => void;
-  onTextBoxChange: (textBoxId: string, content: TextDoc) => void;
   /**
    * Nur fuer eine Insel, die GERADE JETZT durch einen Klick in offenes Meer
    * entstanden ist (siehe SeaView.createIslandWithTextBox) – ihre einzige
@@ -56,20 +51,18 @@ interface IslandViewProps {
  * Verhaeltnis-Trick ueber getBoundingClientRect(). Deshalb bleibt die
  * interaktive Flaeche einer Insel vorerst bei PAGE_WIDTH x PAGE_HEIGHT
  * (wie v1s Seite), WAEHREND die sichtbare Kuestenlinie bereits organisch
- * aus dem Inhalt waechst. Ein Loesen dieser Einschraenkung (Insel-lokaler
- * Ursprung verschiebt sich mit wachsendem Inhalt) ist fuer eine spaetere
- * Stufe vorgemerkt, nicht Teil von Stage C.
+ * aus dem Inhalt waechst.
+ *
+ * Seit Stage E (Verschachtelung): rendert rekursiv ihre eigenen Kind-Inseln
+ * (scene.getChildren(island.id)) als direkte DOM-Kinder – weil dieser Div
+ * selbst `position: absolute` ist, wird er automatisch zum Containing Block
+ * fuer die absolut positionierten Kind-Insel-Divs, ganz ohne zusaetzlichen
+ * Transform-Code pro Verschachtelungsebene.
  */
-export const IslandView = memo(function IslandView({
-  island,
-  toolRef,
-  router,
-  onStrokeCommitted,
-  onTouched,
-  onCreateTextBox,
-  onTextBoxChange,
-  initialAutofocusTextBoxId,
-}: IslandViewProps) {
+export const IslandView = memo(function IslandView({ island, initialAutofocusTextBoxId }: IslandViewProps) {
+  const scene = useScene();
+  const { toolRef, router } = scene;
+
   const elementRef = useRef<HTMLDivElement | null>(null);
   const isNear = useNearViewport(elementRef, MOUNT_MARGIN_PX);
 
@@ -87,7 +80,6 @@ export const IslandView = memo(function IslandView({
   const wetCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const wetCtxRef = useRef<CanvasRenderingContext2D | null>(null);
 
-  const scene = useScene();
   const coastline = useCoastline(island.id, island.layers, island.textBoxes);
   const coastlineRef = useRef(coastline);
   coastlineRef.current = coastline;
@@ -101,6 +93,32 @@ export const IslandView = memo(function IslandView({
   // Resync wieder was zu sehen ist – Tinte wuerde kurz nach jedem Strich
   // verschwinden. Deshalb ein auf die ID-Menge reduzierter, stabiler Key.
   const layerIdsKey = island.layers.map((layer) => layer.id).join(',');
+
+  // -- Miniatur statt Kacheln, wenn die Insel auf dem Bildschirm sehr klein ist --
+  const [useThumbnail, setUseThumbnail] = useState(false);
+  const thumbnailUrlRef = useRef<string>('');
+  const [thumbnailVersion, setThumbnailVersion] = useState(0);
+  const thumbnailTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Signatur statt Array-Referenz, gleiche Begruendung wie layerIdsKey/useCoastline.
+  const contentSignature =
+    island.layers.map((l) => `${l.id}:${l.strokes.length}`).join('|') +
+    '~' +
+    island.textBoxes.map((t) => `${t.id}:${t.x}:${t.y}`).join('|');
+
+  useEffect(() => {
+    if (!island.thumbnailStale) return;
+    if (thumbnailTimerRef.current) clearTimeout(thumbnailTimerRef.current);
+    thumbnailTimerRef.current = setTimeout(() => {
+      thumbnailUrlRef.current = renderThumbnail(island);
+      setThumbnailVersion((v) => v + 1);
+      scene.onThumbnailRendered(island.id, thumbnailUrlRef.current);
+    }, THUMBNAIL_RECOMPUTE_DEBOUNCE_MS);
+    return () => {
+      if (thumbnailTimerRef.current) clearTimeout(thumbnailTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [island.thumbnailStale, contentSignature]);
 
   // TileGrid pro Ebene anlegen/entfernen – nur wenn sich die ID-MENGE aendert.
   useEffect(() => {
@@ -122,7 +140,7 @@ export const IslandView = memo(function IslandView({
   // Container-Elemente anhaengen – ebenfalls nur bei echter Strukturaenderung.
   const layerContainerRefs = useRef(new Map<string, HTMLDivElement>());
   useEffect(() => {
-    if (!isNear) return;
+    if (!isNear || useThumbnail) return;
     for (const id of layerIdsKey.split(',').filter(Boolean)) {
       const container = layerContainerRefs.current.get(id);
       const grid = tileGridsRef.current.get(id);
@@ -132,11 +150,11 @@ export const IslandView = memo(function IslandView({
       for (const grid of tileGridsRef.current.values()) grid.detach();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isNear, layerIdsKey]);
+  }, [isNear, layerIdsKey, useThumbnail]);
 
   useEffect(() => {
     const canvas = wetCanvasRef.current;
-    if (!isNear || !canvas) {
+    if (!isNear || !canvas || useThumbnail) {
       wetCtxRef.current = null;
       return;
     }
@@ -144,7 +162,7 @@ export const IslandView = memo(function IslandView({
     return () => {
       wetCtxRef.current = null;
     };
-  }, [isNear]);
+  }, [isNear, useThumbnail]);
 
   /** Berechnet, welcher insel-lokale Ausschnitt gerade auf dem Bildschirm liegt. */
   const computeVisibleLocalRect = (): Bounds | null => {
@@ -187,7 +205,14 @@ export const IslandView = memo(function IslandView({
   };
 
   const resync = (): void => {
-    if (!isNear) return;
+    const element = elementRef.current;
+    if (element) {
+      const rect = element.getBoundingClientRect();
+      const tiny = Math.min(rect.width, rect.height) < THUMBNAIL_THRESHOLD_PX;
+      setUseThumbnail((current) => (current === tiny ? current : tiny));
+    }
+
+    if (!isNear || useThumbnail) return;
     const rect = computeVisibleLocalRect();
     if (!rect) return;
     for (const layer of layersRef.current) {
@@ -198,21 +223,21 @@ export const IslandView = memo(function IslandView({
   // Bei SceneContext anmelden: wird nach jeder Pan/Zoom-Aenderung gerufen.
   useEffect(() => {
     scene.registerResync(island.id, resync);
-    if (isNear) resync();
+    resync();
     return () => scene.unregisterResync(island.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [island.id, isNear, scene]);
+  }, [island.id, isNear, useThumbnail, scene]);
 
   // Striche neu zuordnen, wenn sich die Ebenen-Daten aendern (z.B. Undo).
   useEffect(() => {
-    if (!isNear) return;
+    if (!isNear || useThumbnail) return;
     for (const layer of island.layers) {
       const grid = tileGridsRef.current.get(layer.id);
       const rect = computeVisibleLocalRect();
       if (grid && rect) grid.sync(rect, layer.strokes);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [island.layers, isNear]);
+  }, [island.layers, isNear, useThumbnail]);
 
   // Pointer-Handling: eigener Controller pro Insel, gemeinsamer Router.
   // Der Controller selbst bekommt NUR move/up/cancel als eigenen Listener
@@ -232,9 +257,9 @@ export const IslandView = memo(function IslandView({
       getTileGrid: (layerId) => tileGridsRef.current.get(layerId) ?? null,
       getDrawingState: () => {
         const tool = toolRef.current;
-        // Oberste Ebene nach `order`, nicht nach Array-Position – Stage D/E
-        // bringt eine echte Ebenenauswahl, bis dahin zeichnet man immer auf
-        // die zuoberst liegende (wie v1s topmostVisibleLayer).
+        // Oberste Ebene nach `order`, nicht nach Array-Position – bis zu
+        // einer echten Ebenenauswahl zeichnet man immer auf die zuoberst
+        // liegende (wie v1s topmostVisibleLayer).
         const activeLayer = layersRef.current.reduce<InkLayer | null>(
           (top, layer) => (!top || layer.order > top.order ? layer : top),
           null,
@@ -248,13 +273,7 @@ export const IslandView = memo(function IslandView({
         };
       },
       onStrokeCommitted: (layerId, stroke) => {
-        const grid = tileGridsRef.current.get(layerId);
-        // Fuer Stift bereits in TileGrid.commitStroke geschehen (siehe
-        // IslandInkController); fuer den Radiergummi muss hier NICHTS
-        // zusaetzlich passieren – deren Kacheln sind durch den Live-Pfad
-        // schon aktuell. Der Bounds-Cache-Eintrag entsteht bei Bedarf lazy.
-        void grid;
-        onStrokeCommitted(layerId, stroke);
+        scene.onStrokeCommitted(island.id, layerId, stroke);
       },
     };
 
@@ -275,12 +294,13 @@ export const IslandView = memo(function IslandView({
       controller.dispose();
       controllerRef.current = null;
     };
-  }, [router, toolRef, onStrokeCommitted]);
+  }, [router, toolRef, scene, island.id]);
 
   // Bei der Ownership-Registry anmelden (siehe scene/ownership.ts).
   useEffect(() => {
     const node: IslandHitNode = {
       id: island.id,
+      parentId: null, // SeaView setzt dies beim Registrieren korrekt (siehe scene.registerIslandHitNode-Wrapper unten).
       z: island.z,
       containsScreenPoint: (clientX, clientY) => {
         const local = screenToLocal(clientX, clientY);
@@ -296,8 +316,20 @@ export const IslandView = memo(function IslandView({
         }
         return coastlineRef.current.containsPoint(local.x, local.y);
       },
+      containsScreenPointInterior: (clientX, clientY) => {
+        const local = screenToLocal(clientX, clientY);
+        if (!local) return false;
+        // NICHT coastline.bounds (das ist die Bounding-Box der schon um
+        // KUESTENABSTAND aufgeblähten Kontur, also praktisch deckungsgleich
+        // mit "ueberhaupt auf der Insel") – contentBounds ist die Bounding-Box
+        // des ROHEN Inhalts, siehe useCoastline.ts.
+        const bounds = coastlineRef.current.contentBounds;
+        if (!bounds) return false;
+        return local.x >= bounds.minX && local.x <= bounds.maxX && local.y >= bounds.minY && local.y <= bounds.maxY;
+      },
+      screenToLocal,
       handlePointerDown: (event) => {
-        onTouched();
+        scene.onTouched(island.id);
 
         // Maus-Klick in "auto"-Modus, der KEINE vorhandene Textbox trifft:
         // Stift/Radiergummi zeichnen weiter wie gewohnt (ueber den
@@ -312,7 +344,7 @@ export const IslandView = memo(function IslandView({
             if (local) {
               const textBox = createTextBox({ x: Math.round(local.x), y: Math.round(local.y) });
               pendingFocusIdRef.current = textBox.id;
-              onCreateTextBox(textBox);
+              scene.onCreateTextBox(island.id, textBox);
               return;
             }
           }
@@ -320,12 +352,11 @@ export const IslandView = memo(function IslandView({
 
         controllerRef.current?.handlePointerDown(event);
       },
-      children: [],
     };
     scene.registerIslandHitNode(node);
     return () => scene.unregisterIslandHitNode(island.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [island.id, island.z, scene, onTouched, onCreateTextBox, toolRef]);
+  }, [island.id, island.z, scene, toolRef]);
 
   const sortedLayers = [...island.layers].sort((a, b) => a.order - b.order);
 
@@ -342,8 +373,8 @@ export const IslandView = memo(function IslandView({
       key={textBox.id}
       textBox={textBox}
       autofocus={isNear && pendingFocusIdRef.current === textBox.id}
-      onChange={(content) => onTextBoxChange(textBox.id, content)}
-      onFocus={onTouched}
+      onChange={(content) => scene.onTextBoxChange(island.id, textBox.id, content)}
+      onFocus={() => scene.onTouched(island.id)}
     />
   ));
 
@@ -359,6 +390,8 @@ export const IslandView = memo(function IslandView({
   // Ueberschwinger der Kontur (siehe coastline.ts) nicht am SVG-Rand
   // abgeschnitten werden.
   const svgMargin = 12;
+
+  const children = scene.getChildren(island.id);
 
   return (
     <div
@@ -395,30 +428,49 @@ export const IslandView = memo(function IslandView({
         </svg>
       )}
 
+      {/* Drag-Griff – siehe SeaView.handleSceneDown fuer die Erkennung von Klicks hierauf. */}
       <div className="island-label">{island.name}</div>
 
-      {isNear &&
-        sortedLayers.map((layer) => (
-          <div
-            key={layer.id}
-            className="island-layer-tiles"
-            ref={(el) => {
-              if (el) layerContainerRefs.current.set(layer.id, el);
-              else layerContainerRefs.current.delete(layer.id);
-            }}
-            style={{ position: 'absolute', inset: 0, zIndex: 10 + layer.order }}
+      {useThumbnail ? (
+        thumbnailUrlRef.current && (
+          <img
+            key={thumbnailVersion}
+            src={thumbnailUrlRef.current}
+            className="island-thumbnail"
+            alt=""
+            style={{ position: 'absolute', inset: 0, width: PAGE_WIDTH, height: PAGE_HEIGHT, zIndex: 5, pointerEvents: 'none' }}
           />
-        ))}
+        )
+      ) : (
+        <>
+          {isNear &&
+            sortedLayers.map((layer) => (
+              <div
+                key={layer.id}
+                className="island-layer-tiles"
+                ref={(el) => {
+                  if (el) layerContainerRefs.current.set(layer.id, el);
+                  else layerContainerRefs.current.delete(layer.id);
+                }}
+                style={{ position: 'absolute', inset: 0, zIndex: 10 + layer.order }}
+              />
+            ))}
 
-      {isNear && (
-        <canvas
-          ref={wetCanvasRef}
-          className="island-wet-layer"
-          style={{ position: 'absolute', inset: 0, width: PAGE_WIDTH, height: PAGE_HEIGHT, zIndex: 900, pointerEvents: 'none' }}
-        />
+          {isNear && (
+            <canvas
+              ref={wetCanvasRef}
+              className="island-wet-layer"
+              style={{ position: 'absolute', inset: 0, width: PAGE_WIDTH, height: PAGE_HEIGHT, zIndex: 900, pointerEvents: 'none' }}
+            />
+          )}
+
+          {isNear && textBoxElements}
+        </>
       )}
 
-      {isNear && textBoxElements}
+      {children.map((child) => (
+        <IslandView key={child.id} island={child} />
+      ))}
     </div>
   );
 });

@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { boundsOf, type Bounds } from '../ink/geometry';
+import { boundsOf, unionOfBounds, type Bounds } from '../ink/geometry';
 import type { TextBox } from '../model/island';
 import type { InkLayer } from '../model/types';
 import { BODY_CSS_FONT, estimateContentBlockCount, getGridSpacing } from './baselineGrid';
@@ -18,7 +18,19 @@ import { charsToPixelWidth } from './textMetrics';
 /** Wartezeit nach der letzten Inhaltsaenderung, bevor neu berechnet wird. */
 const RECOMPUTE_DEBOUNCE_MS = 400;
 
-const EMPTY: CoastlineResult = { loops: [], bounds: null, containsPoint: () => false };
+/**
+ * CoastlineResult.bounds ist die Bounding-Box der FERTIGEN (bereits um
+ * KUESTENABSTAND aufgeblähten + gegltteten) Kontur – fuer die Rand/Mitte-
+ * Unterscheidung beim Drag&Drop (siehe ownership.ts containsScreenPointInterior)
+ * braucht es aber die Bounding-Box des ROHEN Inhalts (Striche/Textboxen VOR
+ * der Aufblähung), sonst waere "Mitte" praktisch deckungsgleich mit "ueberhaupt
+ * auf der Insel" und ein Rand-Drop (Merge) koennte nie zustande kommen.
+ */
+export interface CoastlineWithContentBounds extends CoastlineResult {
+  contentBounds: Bounds | null;
+}
+
+const EMPTY: CoastlineWithContentBounds = { loops: [], bounds: null, contentBounds: null, containsPoint: () => false };
 
 function strokeRectsOf(layers: readonly InkLayer[]): Bounds[] {
   const rects: Bounds[] = [];
@@ -51,8 +63,8 @@ export function useCoastline(
   islandId: string,
   layers: readonly InkLayer[],
   textBoxes: readonly TextBox[],
-): CoastlineResult {
-  const [result, setResult] = useState<CoastlineResult>(EMPTY);
+): CoastlineWithContentBounds {
+  const [result, setResult] = useState<CoastlineWithContentBounds>(EMPTY);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Signatur statt der Array-Referenz: dieselbe Lehre wie bei den Kachel-
@@ -75,7 +87,11 @@ export function useCoastline(
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       const rects = [...strokeRectsOf(layers), ...textBoxRectsOf(textBoxes)];
-      setResult(rects.length > 0 ? computeCoastline(rects, islandId) : EMPTY);
+      if (rects.length === 0) {
+        setResult(EMPTY);
+        return;
+      }
+      setResult({ ...computeCoastline(rects, islandId), contentBounds: unionOfBounds(rects) });
     }, RECOMPUTE_DEBOUNCE_MS);
 
     return () => {

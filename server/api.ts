@@ -59,9 +59,8 @@ export async function handleApiRequest(
       if (moveMatch && req.method === 'POST') {
         const idPath = parseIdPath(moveMatch[1]);
         const body = (await readBody(req)) as { newParentIdPath: string[]; x: number; y: number };
-        await store.move(idPath, body.newParentIdPath, body.x, body.y);
-        res.writeHead(204);
-        res.end();
+        const newEtag = await store.move(idPath, body.newParentIdPath, body.x, body.y);
+        sendJson(res, 200, { ok: true }, newEtag);
         return true;
       }
 

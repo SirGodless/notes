@@ -8,11 +8,21 @@
  * ohne Props-Durchreichung) und eine kleine Registry von "resync"-Funktionen,
  * die SeaView nach jeder Transform-Aenderung gebuendelt aufruft (ueber
  * requestAnimationFrame entprellt, siehe SeaView.tsx).
+ *
+ * Seit Stage E (Verschachtelung) traegt der Context zusaetzlich alle
+ * Insel-uebergreifenden Mutations-Callbacks (onStrokeCommitted usw.) sowie
+ * `toolRef`/`router` und `getChildren` – damit IslandView sich rekursiv
+ * selbst fuer seine Kind-Inseln rendern kann, ohne dass jede Verschachtelungs-
+ * ebene dieselben Callbacks erneut als Props durchreichen muesste.
  */
 
 import { createContext, useContext } from 'react';
+import type { PointerRouter } from '../ink/pointerRouter';
+import type { IslandManifest, TextBox } from '../model/island';
+import type { Stroke, TextDoc } from '../model/types';
 import type { IslandHitNode } from './ownership';
 import type { SceneTransform } from './PanZoomController';
+import type { SceneToolState } from './sceneToolState';
 
 export interface SceneContextValue {
   /** Immer der aktuelle Wert – NICHT als React-Dependency verwenden. */
@@ -30,6 +40,20 @@ export interface SceneContextValue {
    */
   registerIslandHitNode(node: IslandHitNode): void;
   unregisterIslandHitNode(id: string): void;
+
+  /** Stabil ueber die gesamte Sitzung – jede Insel-Ebene braucht denselben Router/Werkzeug-Zustand. */
+  toolRef: React.RefObject<SceneToolState>;
+  router: PointerRouter;
+
+  /** Direkte Kind-Inseln von `islandId` (Stage E: Verschachtelung). */
+  getChildren(islandId: string): IslandManifest[];
+
+  onStrokeCommitted(islandId: string, layerId: string, stroke: Stroke): void;
+  onTouched(islandId: string): void;
+  onCreateTextBox(islandId: string, textBox: TextBox): void;
+  onTextBoxChange(islandId: string, textBoxId: string, content: TextDoc): void;
+  /** Eine Insel hat ihre Miniatur neu gerendert – Flag zuruecksetzen (siehe thumbnailCache.ts). */
+  onThumbnailRendered(islandId: string, dataUrl: string): void;
 }
 
 const SceneContext = createContext<SceneContextValue | null>(null);
