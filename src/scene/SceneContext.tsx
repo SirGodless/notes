@@ -11,6 +11,7 @@
  */
 
 import { createContext, useContext } from 'react';
+import type { IslandHitNode } from './ownership';
 import type { SceneTransform } from './PanZoomController';
 
 export interface SceneContextValue {
@@ -21,6 +22,14 @@ export interface SceneContextValue {
   unregisterResync(id: string): void;
   /** Das DOM-Element, dessen Rect den sichtbaren Bildschirmbereich aufspannt. */
   getViewportElement(): HTMLElement | null;
+  /**
+   * Fuer die Ownership-Aufloesung bei ueberlappenden Inseln (siehe
+   * scene/ownership.ts). Jede Insel meldet sich mit ihrem aktuellen
+   * Kuestenlinien-Test an; SeaView ruft resolveOwner() auf dieser Liste bei
+   * jedem pointerdown auf.
+   */
+  registerIslandHitNode(node: IslandHitNode): void;
+  unregisterIslandHitNode(id: string): void;
 }
 
 const SceneContext = createContext<SceneContextValue | null>(null);

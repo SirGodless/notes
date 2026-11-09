@@ -11,6 +11,7 @@ import {
   putIsland,
 } from '../storage/workspaceApi';
 import { IslandView } from './IslandView';
+import { resolveOwner, type IslandHitNode } from './ownership';
 import { PanZoomController, type SceneTransform } from './PanZoomController';
 import { SceneProvider, type SceneContextValue } from './SceneContext';
 import { initialSceneToolState, type SceneToolState } from './sceneToolState';
@@ -94,15 +95,47 @@ export function SeaView() {
     scheduleResync();
   }, [applyTransform, scheduleResync]);
 
+  // Ownership-Registry fuer ueberlappende Inseln (siehe scene/ownership.ts).
+  // Jede Insel meldet sich mit einem Kuestenlinien-Test an; der zentrale
+  // Dispatcher unten (onScenePointerDownCapture) entscheidet bei jedem
+  // pointerdown, welche Insel gewinnt, BEVOR irgendeine Insel ihren eigenen
+  // pointerdown-Handler sieht (Inseln registrieren dafuer absichtlich
+  // KEINEN eigenen pointerdown-Listener mehr, siehe IslandView.tsx).
+  const hitNodes = useRef(new Map<string, IslandHitNode>());
+
   const sceneValue = useMemo<SceneContextValue>(
     () => ({
       getTransform: () => panZoom.current!.getTransform(),
       getViewportElement: () => viewportRef.current,
       registerResync: (id, fn) => resyncCallbacks.current.set(id, fn),
       unregisterResync: (id) => resyncCallbacks.current.delete(id),
+      registerIslandHitNode: (node) => hitNodes.current.set(node.id, node),
+      unregisterIslandHitNode: (id) => hitNodes.current.delete(id),
     }),
     [],
   );
+
+  // Zentrale Ownership-Aufloesung: native Capture-Phase-Listener auf dem
+  // Viewport (Ancestor aller Inseln), damit er VOR jedem Insel-eigenen
+  // Capture-Listener (move/up/cancel, siehe IslandView) feuert. Findet er
+  // eine Insel, delegiert er direkt an deren handlePointerDown – das
+  // ruft preventDefault()/stopPropagation() bei Bedarf selbst auf, wodurch
+  // der Bubble-Phase-Pan-Handler unten das Event gar nicht erst sieht.
+  // Trifft keine Insel zu (offenes Wasser oder ausserhalb der Kuestenlinie,
+  // auch wenn die rechteckige Bounding-Box noch ueberlappt), bleibt das
+  // Event unangetastet und erreicht normal den Pan-Handler.
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    const handleSceneDown = (event: PointerEvent) => {
+      const winner = resolveOwner([...hitNodes.current.values()], event.clientX, event.clientY);
+      winner?.handlePointerDown(event);
+    };
+
+    viewport.addEventListener('pointerdown', handleSceneDown, { capture: true });
+    return () => viewport.removeEventListener('pointerdown', handleSceneDown, { capture: true });
+  }, []);
 
   const onViewportPointerDown = useCallback((event: React.PointerEvent) => {
     // Nur Events, die KEINE Insel schon per stopPropagation() beansprucht
@@ -246,6 +279,30 @@ export function SeaView() {
     };
   }, []);
 
+  // "Zuletzt beruehrt liegt oben" (siehe ownership.ts): bei jedem pointerdown
+  // auf einer Insel deren z ueber das aller Geschwister heben. Separat von
+  // handleStrokeCommitted, weil auch ein Strich, der am Ende verworfen wird
+  // (z.B. reine Palm-Rejection-Beruehrung zaehlt nicht, die kommt nie bis
+  // hierher – aber ein abgebrochener Radierstrich schon), die Insel sichtbar
+  // nach oben bringen soll.
+  const bumpIslandZ = useCallback((islandId: string) => {
+    setIslands((current) => {
+      const entry = current.get(islandId);
+      if (!entry) return current;
+
+      const othersMaxZ = Math.max(
+        -Infinity,
+        ...[...current.values()].filter((e) => e.manifest.id !== islandId).map((e) => e.manifest.z),
+      );
+      if (entry.manifest.z > othersMaxZ) return current; // bereits eindeutig oben, nichts zu tun
+
+      const next = new Map(current);
+      next.set(islandId, { ...entry, manifest: { ...entry.manifest, z: othersMaxZ + 1 }, dirty: true });
+      return next;
+    });
+    scheduleSave(islandId);
+  }, [scheduleSave]);
+
   const handleStrokeCommitted = useCallback(
     (islandId: string) => (layerId: string, stroke: Stroke) => {
       setIslands((current) => {
@@ -288,6 +345,7 @@ export function SeaView() {
                 toolRef={toolRef}
                 router={router}
                 onStrokeCommittedFactory={handleStrokeCommitted}
+                onTouchedFactory={bumpIslandZ}
               />
             ))}
           </div>
@@ -297,18 +355,23 @@ export function SeaView() {
   );
 }
 
-/** Bindet onStrokeCommitted pro Insel stabil, damit IslandView.memo() greift. */
+/** Bindet onStrokeCommitted/onTouched pro Insel stabil, damit IslandView.memo() greift. */
 function IslandBinding({
   manifest,
   toolRef,
   router,
   onStrokeCommittedFactory,
+  onTouchedFactory,
 }: {
   manifest: IslandManifest;
   toolRef: React.RefObject<SceneToolState>;
   router: PointerRouter;
   onStrokeCommittedFactory: (islandId: string) => (layerId: string, stroke: Stroke) => void;
+  onTouchedFactory: (islandId: string) => void;
 }) {
   const handler = useMemo(() => onStrokeCommittedFactory(manifest.id), [onStrokeCommittedFactory, manifest.id]);
-  return <IslandView island={manifest} toolRef={toolRef} router={router} onStrokeCommitted={handler} />;
+  const onTouched = useCallback(() => onTouchedFactory(manifest.id), [onTouchedFactory, manifest.id]);
+  return (
+    <IslandView island={manifest} toolRef={toolRef} router={router} onStrokeCommitted={handler} onTouched={onTouched} />
+  );
 }

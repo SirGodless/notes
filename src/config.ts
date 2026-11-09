@@ -172,3 +172,22 @@ export const SOFT_LAYER_LIMIT = 8;
 export const ERASER_BUTTON_MASK = 32;
 export const BARREL_BUTTON_MASK = 2;
 export const BARREL_BUTTON_ERASES = true;
+
+// ---------------------------------------------------------------------------
+// Kuestenlinie (v2, Stage C)
+// ---------------------------------------------------------------------------
+
+/**
+ * Abstand der Kuestenlinie vom Inhalt, in Welteinheiten. Zwei Inhaltsklumpen
+ * verschmelzen zu einer Landmasse, sobald sie sich auf weniger als 2x diesen
+ * Wert naehern – das ist beabsichtigt (siehe Plan: "Verschmelzen passiert
+ * nur innerhalb einer Insel").
+ */
+export const KUESTENABSTAND = 24;
+
+/**
+ * Rastergroesse fuer die Distanztransformation, in Welteinheiten pro Zelle.
+ * Kleiner = praeziserer Kuestenverlauf, aber mehr Rechenaufwand (O(Zellen)).
+ * 8 ist fein genug, dass die Kontur bei normaler Zoomstufe glatt wirkt.
+ */
+export const GRID_CELL_SIZE = 8;

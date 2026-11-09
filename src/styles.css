@@ -551,9 +551,30 @@ body {
 }
 
 .island {
-  background: #fff;
-  box-shadow: 0 1px 4px rgb(0 0 0 / 15%);
-  overflow: hidden;
+  /*
+   * Kein fester Hintergrund/Rahmen mehr (das war Stage B, feste
+   * Platzhalter-Rechtecke) und kein overflow:hidden – die sichtbare Form
+   * kommt jetzt von der organischen Kuestenlinie (.island-coastline-path),
+   * die je nach Inhalt auch leicht ueber die interaktive PAGE_WIDTH x
+   * PAGE_HEIGHT-Flaeche hinausragen kann.
+   */
+}
+
+.island-coastline-path {
+  fill: #fff;
+  stroke: #d8d4c8;
+  stroke-width: 1.5;
+  filter: drop-shadow(0 1px 3px rgb(0 0 0 / 18%));
+}
+
+/*
+ * Ueberlappende Kuestenabschnitte (zwei Inseln beruehren sich) werden
+ * gestrichelt statt durchgezogen dargestellt – sichtbarer Hinweis zum
+ * manuellen Aufraeumen, kein automatisches Verschieben (siehe Plan).
+ */
+.island-coastline-path.overlapping {
+  stroke-dasharray: 6 5;
+  stroke: #c08a3e;
 }
 
 .island-label {

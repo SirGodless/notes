@@ -7,10 +7,13 @@ import type { PointerRouter } from '../ink/pointerRouter';
 import { prepareCanvas } from '../ink/renderer';
 import type { IslandManifest } from '../model/island';
 import type { InkLayer, Stroke } from '../model/types';
+import { loopsToSvgPath } from './coastline';
 import { IslandInkController, type IslandInkHost } from './IslandInkController';
+import type { IslandHitNode } from './ownership';
 import { useScene } from './SceneContext';
 import type { SceneToolState } from './sceneToolState';
 import { TileGrid } from './TileGrid';
+import { useCoastline } from './useCoastline';
 
 /** Rand um den Viewport, in dem Inseln schon Kacheln bekommen, bevor sie ganz sichtbar sind. */
 const MOUNT_MARGIN_PX = 600;
@@ -25,22 +28,34 @@ interface IslandViewProps {
   toolRef: React.RefObject<SceneToolState>;
   router: PointerRouter;
   onStrokeCommitted: (layerId: string, stroke: Stroke) => void;
+  /** Wird bei jedem gewonnenen pointerdown gerufen – hebt die Insel per z nach oben. */
+  onTouched: () => void;
 }
 
 /**
- * Eine Insel: fest positioniert (Stage B: feste A4-Groesse als Platzhalter-
- * Rechteck – Stage C ersetzt das durch eine inhaltsgetriebene Kuestenlinie),
- * mit einem TileGrid pro Ink-Ebene und einem ungekachelten Wet-Canvas fuer
- * den gerade laufenden Stift-Strich.
+ * Eine Insel: Platzhalter-Flaeche mit fester Groesse (PAGE_WIDTH x
+ * PAGE_HEIGHT – siehe Kommentar unten zur "unendliches Dokument"-
+ * Einschraenkung), darauf aufgezeichnet die inhaltsgetriebene Kuestenlinie
+ * (Stage C), mit einem TileGrid pro Ink-Ebene und einem ungekachelten
+ * Wet-Canvas fuer den gerade laufenden Stift-Strich.
  *
- * Reihenfolge der Ebenen im DOM entspricht `layers[].order` (niedrig =
- * weiter unten), wie in v1.
+ * WICHTIG (Stage-C-Einschraenkung, bewusst nicht geloest): der Plan
+ * beschreibt eine Insel als "unendliches Dokument" ohne harte Grenze. Die
+ * Pointer-Koordinatenumrechnung (siehe IslandInkController.appendPoint)
+ * braucht aber eine FESTE, bekannte Insel-lokale Breite/Hoehe fuer den
+ * Verhaeltnis-Trick ueber getBoundingClientRect(). Deshalb bleibt die
+ * interaktive Flaeche einer Insel vorerst bei PAGE_WIDTH x PAGE_HEIGHT
+ * (wie v1s Seite), WAEHREND die sichtbare Kuestenlinie bereits organisch
+ * aus dem Inhalt waechst. Ein Loesen dieser Einschraenkung (Insel-lokaler
+ * Ursprung verschiebt sich mit wachsendem Inhalt) ist fuer eine spaetere
+ * Stufe vorgemerkt, nicht Teil von Stage C.
  */
 export const IslandView = memo(function IslandView({
   island,
   toolRef,
   router,
   onStrokeCommitted,
+  onTouched,
 }: IslandViewProps) {
   const elementRef = useRef<HTMLDivElement | null>(null);
   const isNear = useNearViewport(elementRef, MOUNT_MARGIN_PX);
@@ -53,6 +68,9 @@ export const IslandView = memo(function IslandView({
   const wetCtxRef = useRef<CanvasRenderingContext2D | null>(null);
 
   const scene = useScene();
+  const coastline = useCoastline(island.id, island.layers);
+  const coastlineRef = useRef(coastline);
+  coastlineRef.current = coastline;
 
   // WICHTIG: haengt NICHT an `island.layers` direkt. Dessen Array-Referenz
   // aendert sich bei JEDEM Strich (SeaView baut die Ebenen-Liste neu), auch
@@ -136,6 +154,18 @@ export const IslandView = memo(function IslandView({
     };
   };
 
+  /** Bildschirm- -> insel-lokale Koordinaten, fuer den Kuestenlinien-Hit-Test. */
+  const screenToLocal = (clientX: number, clientY: number): { x: number; y: number } | null => {
+    const element = elementRef.current;
+    if (!element) return null;
+    const rect = element.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+    return {
+      x: ((clientX - rect.left) / rect.width) * PAGE_WIDTH,
+      y: ((clientY - rect.top) / rect.height) * PAGE_HEIGHT,
+    };
+  };
+
   const resync = (): void => {
     if (!isNear) return;
     const rect = computeVisibleLocalRect();
@@ -165,6 +195,12 @@ export const IslandView = memo(function IslandView({
   }, [island.layers, isNear]);
 
   // Pointer-Handling: eigener Controller pro Insel, gemeinsamer Router.
+  // Der Controller selbst bekommt NUR move/up/cancel als eigenen Listener
+  // (siehe unten) – pointerdown kommt ausschliesslich ueber die zentrale
+  // Ownership-Aufloesung in SeaView (resolveOwner -> hitNode.handlePointerDown),
+  // sonst wuerden bei ueberlappenden Inseln mehrere DOM-Elemente gleichzeitig
+  // unabhaengig voneinander "ja, meins" sagen.
+  const controllerRef = useRef<IslandInkController | null>(null);
   useEffect(() => {
     const element = elementRef.current;
     if (!element) return;
@@ -203,25 +239,61 @@ export const IslandView = memo(function IslandView({
     };
 
     const controller = new IslandInkController(host, router);
+    controllerRef.current = controller;
     const options = { capture: true, passive: false } as const;
 
-    element.addEventListener('pointerdown', controller.handlePointerDown, options);
     element.addEventListener('pointermove', controller.handlePointerMove, options);
     element.addEventListener('pointerup', controller.handlePointerUp, options);
     element.addEventListener('pointercancel', controller.handlePointerCancel, options);
     element.addEventListener('lostpointercapture', controller.handlePointerCancel, options);
 
     return () => {
-      element.removeEventListener('pointerdown', controller.handlePointerDown, options);
       element.removeEventListener('pointermove', controller.handlePointerMove, options);
       element.removeEventListener('pointerup', controller.handlePointerUp, options);
       element.removeEventListener('pointercancel', controller.handlePointerCancel, options);
       element.removeEventListener('lostpointercapture', controller.handlePointerCancel, options);
       controller.dispose();
+      controllerRef.current = null;
     };
   }, [router, toolRef, onStrokeCommitted]);
 
+  // Bei der Ownership-Registry anmelden (siehe scene/ownership.ts).
+  useEffect(() => {
+    const node: IslandHitNode = {
+      id: island.id,
+      z: island.z,
+      containsScreenPoint: (clientX, clientY) => {
+        const local = screenToLocal(clientX, clientY);
+        if (!local) return false;
+        // Eine brandneue Insel hat noch keinen Inhalt, also auch noch keine
+        // Kuestenlinie (leere Schleifenliste, containsPoint waere ueberall
+        // false) – dann wuerde sie NIE ihren ersten Strich bekommen koennen.
+        // Deshalb: ohne Inhalt zaehlt die ganze interaktive Flaeche als
+        // "innerhalb". Sobald echter Inhalt existiert, uebernimmt die
+        // tatsaechliche Kuestenlinie.
+        if (coastlineRef.current.loops.length === 0) {
+          return local.x >= 0 && local.x <= PAGE_WIDTH && local.y >= 0 && local.y <= PAGE_HEIGHT;
+        }
+        return coastlineRef.current.containsPoint(local.x, local.y);
+      },
+      handlePointerDown: (event) => {
+        onTouched();
+        controllerRef.current?.handlePointerDown(event);
+      },
+      children: [],
+    };
+    scene.registerIslandHitNode(node);
+    return () => scene.unregisterIslandHitNode(island.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [island.id, island.z, scene, onTouched]);
+
   const sortedLayers = [...island.layers].sort((a, b) => a.order - b.order);
+  const svgPath = loopsToSvgPath(coastline.loops);
+  const svgBounds = coastline.bounds ?? { minX: 0, minY: 0, maxX: PAGE_WIDTH, maxY: PAGE_HEIGHT };
+  // Etwas Rand um die berechneten Bounds, damit die Glaettungs-/Stoerungs-
+  // Ueberschwinger der Kontur (siehe coastline.ts) nicht am SVG-Rand
+  // abgeschnitten werden.
+  const svgMargin = 12;
 
   return (
     <div
@@ -237,6 +309,27 @@ export const IslandView = memo(function IslandView({
         touchAction: 'none',
       }}
     >
+      {svgPath && (
+        <svg
+          className="island-coastline"
+          style={{
+            position: 'absolute',
+            // Das SVG selbst muss an die Bounds-Position gerueckt werden –
+            // der viewBox-Ursprung allein verschiebt nur den INHALT
+            // innerhalb des SVG, nicht das SVG-Element auf der Seite.
+            left: svgBounds.minX - svgMargin,
+            top: svgBounds.minY - svgMargin,
+            overflow: 'visible',
+            pointerEvents: 'none',
+          }}
+          width={svgBounds.maxX - svgBounds.minX + svgMargin * 2}
+          height={svgBounds.maxY - svgBounds.minY + svgMargin * 2}
+          viewBox={`${svgBounds.minX - svgMargin} ${svgBounds.minY - svgMargin} ${svgBounds.maxX - svgBounds.minX + svgMargin * 2} ${svgBounds.maxY - svgBounds.minY + svgMargin * 2}`}
+        >
+          <path d={svgPath} className="island-coastline-path" />
+        </svg>
+      )}
+
       <div className="island-label">{island.name}</div>
 
       {isNear &&
