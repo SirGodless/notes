@@ -594,3 +594,50 @@ body {
 .ink-tile {
   display: block;
 }
+
+/* ============================================================================
+   v2: Textboxen (Stage D). Vertikaler Rhythmus rein ueber line-height +
+   genullte Margins – siehe scene/baselineGrid.ts fuer die Begruendung.
+   Die --rhythm- und --grid-spacing Werte setzt scene/applyGridRhythm.ts einmalig
+   zur Laufzeit (haengen von der tatsaechlich gerenderten Schrift ab, lassen
+   sich nicht zuverlaessig statisch im CSS vorhersagen).
+   ============================================================================ */
+
+.textbox {
+  z-index: 500;
+}
+
+.textbox-content {
+  outline: none;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.textbox-content p,
+.textbox-content h1,
+.textbox-content h2,
+.textbox-content h3 {
+  margin: 0;
+}
+
+.textbox-content p {
+  font-size: var(--rhythm-p-size, 16px);
+  line-height: var(--rhythm-p-line, 1.4);
+}
+
+.textbox-content h1 {
+  font-size: var(--rhythm-h1-size, 28px);
+  line-height: var(--rhythm-h1-line, 1.3);
+  font-weight: 700;
+}
+
+.textbox-content h2 {
+  font-size: var(--rhythm-h2-size, 22px);
+  line-height: var(--rhythm-h2-line, 1.3);
+  font-weight: 700;
+}
+
+.textbox-content h3 {
+  font-size: var(--rhythm-h3-size, 18px);
+  line-height: var(--rhythm-h3-line, 1.3);
+  font-weight: 700;
+}

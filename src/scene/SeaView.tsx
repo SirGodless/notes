@@ -2,14 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { isInputActive } from '../ink/inputActivity';
 import { PointerRouter } from '../ink/pointerRouter';
-import { createIslandManifest, type IslandManifest } from '../model/island';
-import type { Stroke } from '../model/types';
+import { createIslandManifest, createTextBox, type IslandManifest, type TextBox } from '../model/island';
+import type { Stroke, TextDoc } from '../model/types';
 import {
   ETagConflictError,
   fetchIsland,
   fetchTree,
   putIsland,
 } from '../storage/workspaceApi';
+import { applyGridRhythm } from './applyGridRhythm';
 import { IslandView } from './IslandView';
 import { resolveOwner, type IslandHitNode } from './ownership';
 import { PanZoomController, type SceneTransform } from './PanZoomController';
@@ -61,6 +62,12 @@ export function SeaView() {
   const router = useRef(new PointerRouter()).current;
   useEffect(() => () => router.dispose(), [router]);
 
+  // Einmalig: Grundlinienraster-Werte (siehe baselineGrid.ts) als CSS Custom
+  // Properties auf :root setzen, bevor irgendeine Textbox sie braucht.
+  useEffect(() => {
+    applyGridRhythm();
+  }, []);
+
   // -- Pan/Zoom --------------------------------------------------------------
 
   const resyncCallbacks = useRef(new Map<string, () => void>());
@@ -103,6 +110,38 @@ export function SeaView() {
   // KEINEN eigenen pointerdown-Listener mehr, siehe IslandView.tsx).
   const hitNodes = useRef(new Map<string, IslandHitNode>());
 
+  // Insel-ID -> Textbox-ID, fuer genau EINEN Frame gesetzt, wenn ein Klick
+  // in offenes Meer eine brandneue Insel mit ihrer ersten Textbox erzeugt
+  // (siehe createIslandWithTextBox) – IslandView liest das einmalig als
+  // Startwert eines Refs ein (siehe initialAutofocusTextBoxId-Prop), damit
+  // die neue Textbox sofort den Cursor bekommt, ohne zweiten Klick.
+  const pendingIslandFocusRef = useRef(new Map<string, string>());
+
+  /**
+   * Klick in offenes Wasser (keine Insel unter dem Zeiger, siehe
+   * handleSceneDown) legt eine neue Insel mit einer einzelnen Textbox an der
+   * angeklickten Weltposition an – siehe Plan, Abschnitt "Textboxen":
+   * "In offenem Wasser ... erzeugt eine neue Textbox automatisch eine neue
+   * Insel."
+   */
+  const createIslandWithTextBox = useCallback(async (worldX: number, worldY: number) => {
+    const textBox = createTextBox({ x: 0, y: 0 });
+    const manifest = createIslandManifest({
+      name: `Insel ${islandsRef.current.size + 1}`,
+      x: Math.round(worldX),
+      y: Math.round(worldY),
+      textBoxes: [textBox],
+    });
+
+    pendingIslandFocusRef.current.set(manifest.id, textBox.id);
+    const etag = await putIsland([manifest.id], manifest);
+    setIslands((current) => {
+      const next = new Map(current);
+      next.set(manifest.id, { manifest, etag, dirty: false });
+      return next;
+    });
+  }, []);
+
   const sceneValue = useMemo<SceneContextValue>(
     () => ({
       getTransform: () => panZoom.current!.getTransform(),
@@ -130,12 +169,29 @@ export function SeaView() {
 
     const handleSceneDown = (event: PointerEvent) => {
       const winner = resolveOwner([...hitNodes.current.values()], event.clientX, event.clientY);
-      winner?.handlePointerDown(event);
+      if (winner) {
+        winner.handlePointerDown(event);
+        return;
+      }
+
+      // Keine Insel getroffen: ein Maus-Klick in "auto"-Modus auf offenem
+      // Meer legt eine neue Insel an (siehe createIslandWithTextBox).
+      // stopPropagation(), damit der Bubble-Phase-Pan-Handler (siehe
+      // onViewportPointerDown) aus demselben Klick keine Drag-Geste startet.
+      if (event.pointerType === 'mouse' && toolRef.current.mode === 'auto') {
+        const rect = viewportRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const transform = panZoom.current!.getTransform();
+        const worldX = (event.clientX - rect.left - transform.x) / transform.zoom;
+        const worldY = (event.clientY - rect.top - transform.y) / transform.zoom;
+        event.stopPropagation();
+        void createIslandWithTextBox(worldX, worldY);
+      }
     };
 
     viewport.addEventListener('pointerdown', handleSceneDown, { capture: true });
     return () => viewport.removeEventListener('pointerdown', handleSceneDown, { capture: true });
-  }, []);
+  }, [createIslandWithTextBox]);
 
   const onViewportPointerDown = useCallback((event: React.PointerEvent) => {
     // Nur Events, die KEINE Insel schon per stopPropagation() beansprucht
@@ -322,6 +378,54 @@ export function SeaView() {
     [scheduleSave],
   );
 
+  /** Neue Textbox durch Klick in offenes Wasser INNERHALB einer bestehenden Insel (siehe IslandView). */
+  const handleCreateTextBox = useCallback(
+    (islandId: string) => (textBox: TextBox) => {
+      setIslands((current) => {
+        const entry = current.get(islandId);
+        if (!entry) return current;
+
+        const next = new Map(current);
+        next.set(islandId, {
+          ...entry,
+          manifest: {
+            ...entry.manifest,
+            textBoxes: [...entry.manifest.textBoxes, textBox],
+            coastlineDirty: true,
+            thumbnailStale: true,
+          },
+          dirty: true,
+        });
+        return next;
+      });
+      scheduleSave(islandId);
+    },
+    [scheduleSave],
+  );
+
+  const handleTextBoxChanged = useCallback(
+    (islandId: string) => (textBoxId: string, content: TextDoc) => {
+      setIslands((current) => {
+        const entry = current.get(islandId);
+        if (!entry) return current;
+
+        const textBoxes = entry.manifest.textBoxes.map((textBox) =>
+          textBox.id === textBoxId ? { ...textBox, content } : textBox,
+        );
+
+        const next = new Map(current);
+        next.set(islandId, {
+          ...entry,
+          manifest: { ...entry.manifest, textBoxes, coastlineDirty: true, thumbnailStale: true },
+          dirty: true,
+        });
+        return next;
+      });
+      scheduleSave(islandId);
+    },
+    [scheduleSave],
+  );
+
   return (
     <SceneProvider value={sceneValue}>
       <div className="sea-app">
@@ -338,16 +442,27 @@ export function SeaView() {
           onPointerCancel={onViewportPointerCancel}
         >
           <div ref={worldRef} className="sea-world" style={{ transform: 'translate(0px, 0px) scale(1)' }}>
-            {[...islands.values()].map((entry) => (
-              <IslandBinding
-                key={entry.manifest.id}
-                manifest={entry.manifest}
-                toolRef={toolRef}
-                router={router}
-                onStrokeCommittedFactory={handleStrokeCommitted}
-                onTouchedFactory={bumpIslandZ}
-              />
-            ))}
+            {[...islands.values()].map((entry) => {
+              // IslandView liest das nur als EINMALIGEN Startwert eines Refs
+              // beim Mount – ob der Eintrag hier liegen bleibt, spielt fuer
+              // spaetere Re-Renders keine Rolle (bewusst NICHT geloescht,
+              // damit React-StrictMode-Doppel-Renders im Dev-Modus den Wert
+              // nicht vor dem eigentlichen Mount wegraeumen).
+              const initialAutofocusTextBoxId = pendingIslandFocusRef.current.get(entry.manifest.id);
+              return (
+                <IslandBinding
+                  key={entry.manifest.id}
+                  manifest={entry.manifest}
+                  toolRef={toolRef}
+                  router={router}
+                  onStrokeCommittedFactory={handleStrokeCommitted}
+                  onTouchedFactory={bumpIslandZ}
+                  onCreateTextBoxFactory={handleCreateTextBox}
+                  onTextBoxChangeFactory={handleTextBoxChanged}
+                  initialAutofocusTextBoxId={initialAutofocusTextBoxId}
+                />
+              );
+            })}
           </div>
         </div>
       </div>
@@ -355,23 +470,46 @@ export function SeaView() {
   );
 }
 
-/** Bindet onStrokeCommitted/onTouched pro Insel stabil, damit IslandView.memo() greift. */
+/** Bindet onStrokeCommitted/onTouched/etc. pro Insel stabil, damit IslandView.memo() greift. */
 function IslandBinding({
   manifest,
   toolRef,
   router,
   onStrokeCommittedFactory,
   onTouchedFactory,
+  onCreateTextBoxFactory,
+  onTextBoxChangeFactory,
+  initialAutofocusTextBoxId,
 }: {
   manifest: IslandManifest;
   toolRef: React.RefObject<SceneToolState>;
   router: PointerRouter;
   onStrokeCommittedFactory: (islandId: string) => (layerId: string, stroke: Stroke) => void;
   onTouchedFactory: (islandId: string) => void;
+  onCreateTextBoxFactory: (islandId: string) => (textBox: TextBox) => void;
+  onTextBoxChangeFactory: (islandId: string) => (textBoxId: string, content: TextDoc) => void;
+  initialAutofocusTextBoxId?: string;
 }) {
   const handler = useMemo(() => onStrokeCommittedFactory(manifest.id), [onStrokeCommittedFactory, manifest.id]);
   const onTouched = useCallback(() => onTouchedFactory(manifest.id), [onTouchedFactory, manifest.id]);
+  const onCreateTextBox = useMemo(
+    () => onCreateTextBoxFactory(manifest.id),
+    [onCreateTextBoxFactory, manifest.id],
+  );
+  const onTextBoxChange = useMemo(
+    () => onTextBoxChangeFactory(manifest.id),
+    [onTextBoxChangeFactory, manifest.id],
+  );
   return (
-    <IslandView island={manifest} toolRef={toolRef} router={router} onStrokeCommitted={handler} onTouched={onTouched} />
+    <IslandView
+      island={manifest}
+      toolRef={toolRef}
+      router={router}
+      onStrokeCommitted={handler}
+      onTouched={onTouched}
+      onCreateTextBox={onCreateTextBox}
+      onTextBoxChange={onTextBoxChange}
+      initialAutofocusTextBoxId={initialAutofocusTextBoxId}
+    />
   );
 }

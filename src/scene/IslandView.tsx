@@ -5,13 +5,14 @@ import { useNearViewport } from '../hooks/useNearViewport';
 import type { Bounds } from '../ink/geometry';
 import type { PointerRouter } from '../ink/pointerRouter';
 import { prepareCanvas } from '../ink/renderer';
-import type { IslandManifest } from '../model/island';
-import type { InkLayer, Stroke } from '../model/types';
+import { createTextBox, type IslandManifest, type TextBox } from '../model/island';
+import type { InkLayer, Stroke, TextDoc } from '../model/types';
 import { loopsToSvgPath } from './coastline';
 import { IslandInkController, type IslandInkHost } from './IslandInkController';
 import type { IslandHitNode } from './ownership';
 import { useScene } from './SceneContext';
 import type { SceneToolState } from './sceneToolState';
+import { TextBoxView } from './TextBoxView';
 import { TileGrid } from './TileGrid';
 import { useCoastline } from './useCoastline';
 
@@ -30,6 +31,15 @@ interface IslandViewProps {
   onStrokeCommitted: (layerId: string, stroke: Stroke) => void;
   /** Wird bei jedem gewonnenen pointerdown gerufen – hebt die Insel per z nach oben. */
   onTouched: () => void;
+  /** Eine neue Textbox ist auf dieser Insel entstanden (Klick in offenes Wasser INNERHALB der Insel). */
+  onCreateTextBox: (textBox: TextBox) => void;
+  onTextBoxChange: (textBoxId: string, content: TextDoc) => void;
+  /**
+   * Nur fuer eine Insel, die GERADE JETZT durch einen Klick in offenes Meer
+   * entstanden ist (siehe SeaView.createIslandWithTextBox) – ihre einzige
+   * Textbox soll sofort den Cursor bekommen, ohne zweiten Klick.
+   */
+  initialAutofocusTextBoxId?: string;
 }
 
 /**
@@ -56,9 +66,19 @@ export const IslandView = memo(function IslandView({
   router,
   onStrokeCommitted,
   onTouched,
+  onCreateTextBox,
+  onTextBoxChange,
+  initialAutofocusTextBoxId,
 }: IslandViewProps) {
   const elementRef = useRef<HTMLDivElement | null>(null);
   const isNear = useNearViewport(elementRef, MOUNT_MARGIN_PX);
+
+  // Siehe initialAutofocusTextBoxId-Doku: einmalig als Startwert gesetzt
+  // (neue Insel aus offenem Meer), danach bei jedem Klick in offenes Wasser
+  // INNERHALB der Insel neu belegt (siehe Ownership-Registrierung unten) und
+  // nach dem Rendern sofort wieder geleert, damit spaetere Re-Renders keine
+  // alte Textbox erneut fokussieren.
+  const pendingFocusIdRef = useRef<string | null>(initialAutofocusTextBoxId ?? null);
 
   const tileGridsRef = useRef(new Map<string, TileGrid>());
   const layersRef = useRef(island.layers);
@@ -68,7 +88,7 @@ export const IslandView = memo(function IslandView({
   const wetCtxRef = useRef<CanvasRenderingContext2D | null>(null);
 
   const scene = useScene();
-  const coastline = useCoastline(island.id, island.layers);
+  const coastline = useCoastline(island.id, island.layers, island.textBoxes);
   const coastlineRef = useRef(coastline);
   coastlineRef.current = coastline;
 
@@ -278,6 +298,26 @@ export const IslandView = memo(function IslandView({
       },
       handlePointerDown: (event) => {
         onTouched();
+
+        // Maus-Klick in "auto"-Modus, der KEINE vorhandene Textbox trifft:
+        // Stift/Radiergummi zeichnen weiter wie gewohnt (ueber den
+        // Controller), aber ein Klick ins offene Wasser INNERHALB der Insel
+        // erzeugt eine neue Textbox dort – siehe Plan, Abschnitt
+        // "Textboxen": "Entstehen, wo man zu tippen beginnt."
+        if (event.pointerType === 'mouse' && toolRef.current.mode === 'auto') {
+          const targetElement = event.target as HTMLElement | null;
+          const onExistingTextBox = targetElement?.closest?.('.textbox');
+          if (!onExistingTextBox) {
+            const local = screenToLocal(event.clientX, event.clientY);
+            if (local) {
+              const textBox = createTextBox({ x: Math.round(local.x), y: Math.round(local.y) });
+              pendingFocusIdRef.current = textBox.id;
+              onCreateTextBox(textBox);
+              return;
+            }
+          }
+        }
+
         controllerRef.current?.handlePointerDown(event);
       },
       children: [],
@@ -285,9 +325,34 @@ export const IslandView = memo(function IslandView({
     scene.registerIslandHitNode(node);
     return () => scene.unregisterIslandHitNode(island.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [island.id, island.z, scene, onTouched]);
+  }, [island.id, island.z, scene, onTouched, onCreateTextBox, toolRef]);
 
   const sortedLayers = [...island.layers].sort((a, b) => a.order - b.order);
+
+  // Siehe pendingFocusIdRef-Doku oben: wird waehrend dieses Renders gelesen
+  // (fuer hoechstens EINE Textbox pro Insel "wahr"), NICHT aber direkt hier
+  // im Render-Koerper geleert (siehe Effekt weiter unten) – React (Dev-
+  // StrictMode) ruft Render-Funktionen zur Reinheits-Pruefung manchmal
+  // zweimal auf; eine Ref-MUTATION waehrend des Renders wuerde dann beim
+  // zweiten Aufruf den bereits geleerten Wert sehen, wodurch der Fokus-Flag
+  // nichtdeterministisch verloren gehen koennte. Nur LESEN ist dagegen rein
+  // und liefert bei jedem der beiden Aufrufe denselben Wert.
+  const textBoxElements = island.textBoxes.map((textBox) => (
+    <TextBoxView
+      key={textBox.id}
+      textBox={textBox}
+      autofocus={isNear && pendingFocusIdRef.current === textBox.id}
+      onChange={(content) => onTextBoxChange(textBox.id, content)}
+      onFocus={onTouched}
+    />
+  ));
+
+  // Leeren NACH dem Commit (siehe Begruendung oben), nur wenn isNear – vor
+  // dem ersten echten Mount (isNear noch false) soll der Flag ueberleben.
+  useEffect(() => {
+    if (isNear) pendingFocusIdRef.current = null;
+  });
+
   const svgPath = loopsToSvgPath(coastline.loops);
   const svgBounds = coastline.bounds ?? { minX: 0, minY: 0, maxX: PAGE_WIDTH, maxY: PAGE_HEIGHT };
   // Etwas Rand um die berechneten Bounds, damit die Glaettungs-/Stoerungs-
@@ -352,6 +417,8 @@ export const IslandView = memo(function IslandView({
           style={{ position: 'absolute', inset: 0, width: PAGE_WIDTH, height: PAGE_HEIGHT, zIndex: 900, pointerEvents: 'none' }}
         />
       )}
+
+      {isNear && textBoxElements}
     </div>
   );
 });
