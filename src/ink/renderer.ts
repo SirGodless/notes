@@ -16,15 +16,21 @@ import { widthAt } from './pressure';
  */
 
 /**
- * Setzt Groesse und Transform eines Layer-Canvas.
+ * Setzt Groesse und Transform eines Canvas.
+ *
+ * worldWidth/worldHeight sind optional (Default: PAGE_WIDTH/PAGE_HEIGHT, fuer
+ * v1-Aufrufstellen unveraendert) – TileGrid (v2) ruft hier mit der
+ * Kachelgroesse in Welteinheiten auf, statt der festen Seitengroesse.
  * Gibt den Context zurueck, oder null wenn der Browser keinen liefert.
  */
 export function prepareCanvas(
   canvas: HTMLCanvasElement,
   scale: number,
+  worldWidth: number = PAGE_WIDTH,
+  worldHeight: number = PAGE_HEIGHT,
 ): CanvasRenderingContext2D | null {
-  const targetWidth = Math.round(PAGE_WIDTH * scale);
-  const targetHeight = Math.round(PAGE_HEIGHT * scale);
+  const targetWidth = Math.round(worldWidth * scale);
+  const targetHeight = Math.round(worldHeight * scale);
 
   // Groesse nur setzen wenn noetig – ein Schreibzugriff auf canvas.width
   // leert das Canvas, auch wenn sich der Wert nicht aendert.
@@ -42,9 +48,24 @@ export function prepareCanvas(
   return ctx;
 }
 
+/**
+ * Leert das komplette Canvas, unabhaengig davon, welche Transform-Matrix
+ * gerade aktiv ist (wichtig fuer Kacheln: deren Transform verschiebt den
+ * Welt-Ursprung, ein auf PAGE_WIDTH/PAGE_HEIGHT bezogenes clearRect wuerde
+ * dort die falsche Flaeche treffen). Loescht ueber Geraete-Pixel-Koordinaten
+ * (0,0,canvas.width,canvas.height), die sind transform-unabhaengig immer
+ * "das ganze Canvas". ctx.save()/restore() stellt die vorherige Transform
+ * danach wieder her, damit Aufrufer direkt im Anschluss in Welt-Koordinaten
+ * weiterzeichnen koennen, ohne sie neu zu setzen – globalCompositeOperation
+ * wird deshalb bewusst NICHT hier zurueckgesetzt (restore() wuerde das
+ * sofort wieder aufheben): applyStrokeStyle() setzt sie vor jedem
+ * tatsaechlichen Zeichenaufruf ohnehin explizit.
+ */
 export function clearContext(ctx: CanvasRenderingContext2D): void {
-  ctx.globalCompositeOperation = 'source-over';
-  ctx.clearRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT);
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  ctx.restore();
 }
 
 function applyStrokeStyle(ctx: CanvasRenderingContext2D, stroke: Stroke): void {

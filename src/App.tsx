@@ -1,18 +1,12 @@
-import { AppProvider } from './state/AppState';
-import { EditorContainer } from './components/EditorContainer';
-import { LayerPanel } from './components/LayerPanel';
-import { Toolbar } from './components/Toolbar';
+import { SeaView } from './scene/SeaView';
 
+/**
+ * Ab v2 (Stage B) ist die Szene (das Meer mit seinen Inseln) der
+ * Haupteinstiegspunkt. v1s Seiten-Editor (state/AppState.tsx,
+ * components/EditorContainer.tsx etc.) bleibt im Repo als Referenz liegen,
+ * bis Stage F (Migration + Cutover) die alten Dateien entfernt – bis dahin
+ * ist er ueber App.tsx nicht mehr erreichbar.
+ */
 export default function App() {
-  return (
-    <AppProvider>
-      <div className="app">
-        <Toolbar />
-        <div className="app-body">
-          <EditorContainer />
-          <LayerPanel />
-        </div>
-      </div>
-    </AppProvider>
-  );
+  return <SeaView />;
 }

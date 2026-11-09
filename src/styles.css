@@ -454,3 +454,122 @@ body {
     width: 210px;
   }
 }
+
+/* ============================================================================
+   v2: Szene (Meer + Inseln). Siehe scene/. v1s Styles oben bleiben fuer eine
+   eventuelle Rueckkehr zu v1 erhalten, kollidieren aber nicht (eigene
+   Klassennamen), da App.tsx ab Stage B nur noch <SeaView> rendert.
+   ============================================================================ */
+
+.sea-app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.scene-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.scene-toolbar .toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.scene-toolbar button {
+  min-width: 30px;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.scene-toolbar button:hover {
+  border-color: var(--accent);
+}
+
+.scene-toolbar button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.scene-toolbar .swatch {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.scene-toolbar .swatch.active {
+  border-color: var(--text);
+}
+
+.sea-error {
+  padding: 8px 12px;
+  background: #fde8e8;
+  color: #9a1c1c;
+  font-size: 13px;
+}
+
+/*
+ * Der Viewport ist das Fenster, durch das man das Meer sieht – feste Groesse,
+ * selbst kein Scroll-Container (siehe PanZoomController: Pan/Zoom ist eine
+ * eigene Implementierung, kein natives Scrollen).
+ */
+.sea-viewport {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  background: #e8e8ec;
+  cursor: grab;
+  /* Wir werten Touch/Pen/Mouse selbst aus (PointerRouter) – der Browser soll
+     hier nichts eigenmaechtig scrollen oder zoomen. */
+  touch-action: none;
+}
+
+/* Traegt die eine Pan/Zoom-Transform fuer die ganze Szene. */
+.sea-world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.island {
+  background: #fff;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 15%);
+  overflow: hidden;
+}
+
+.island-label {
+  position: absolute;
+  top: -22px;
+  left: 0;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.island-layer-tiles {
+  overflow: hidden;
+}
+
+/* Einzelne Kachel-Canvases (von TileGrid imperativ angehaengt). */
+.ink-tile {
+  display: block;
+}

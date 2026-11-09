@@ -47,3 +47,8 @@ export function boundsOf(points: readonly StrokePoint[], padding = 0): Bounds | 
     maxY: maxY + padding,
   };
 }
+
+/** Beruehren oder ueberlappen sich zwei achsenparallele Rechtecke? */
+export function rectsOverlap(a: Bounds, b: Bounds): boolean {
+  return a.minX <= b.maxX && a.maxX >= b.minX && a.minY <= b.maxY && a.maxY >= b.minY;
+}
