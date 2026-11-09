@@ -5,13 +5,15 @@ interface ToolbarProps {
   tool: SceneToolState;
   updateTool: (patch: Partial<SceneToolState>) => void;
   onAddIsland: () => void;
+  /** v1-Export-Datei (.json) ausgewaehlt – siehe SeaView.importV1File / model/migrations.ts migrateV1ToV2. */
+  onImportV1File: (file: File) => void;
 }
 
 /**
  * Minimale Werkzeugleiste fuer Stage B – reicht, um die Zeichen-Pipeline zu
  * testen. Ebenen-Panel, Seiten/Inseln-Verwaltung etc. kommen mit Stage D/E.
  */
-export function Toolbar({ tool, updateTool, onAddIsland }: ToolbarProps) {
+export function Toolbar({ tool, updateTool, onAddIsland, onImportV1File }: ToolbarProps) {
   return (
     <header className="scene-toolbar">
       <div className="toolbar-group">
@@ -70,6 +72,18 @@ export function Toolbar({ tool, updateTool, onAddIsland }: ToolbarProps) {
         <button type="button" onClick={onAddIsland}>
           + Insel
         </button>
+        <label className="toolbar-file-button">
+          v1-Datei importieren
+          <input
+            type="file"
+            accept="application/json"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) onImportV1File(file);
+              event.target.value = ''; // dieselbe Datei danach erneut auswaehlbar machen
+            }}
+          />
+        </label>
       </div>
     </header>
   );

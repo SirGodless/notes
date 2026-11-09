@@ -21,8 +21,12 @@
 export const PAGE_WIDTH = 794;
 export const PAGE_HEIGHT = 1123;
 
-/** Innenabstand des Text-Layers zum Seitenrand, in Page-Space-Pixeln (~2cm). */
-export const PAGE_PADDING = 76;
+/**
+ * Luecke zwischen zwei aus einer migrierten v1-Datei entstandenen Inseln
+ * (siehe model/migrations.ts: migrateV1ToV2) – dieselbe vertikale Stapelung
+ * wie v1s Seiten, nur mit etwas Platz dazwischen statt nahtlos aneinander.
+ */
+export const V1_MIGRATION_PAGE_GAP = 80;
 
 // ---------------------------------------------------------------------------
 // Canvas-Aufloesung
@@ -51,7 +55,6 @@ export function getRenderScale(): number {
 
 export const MIN_ZOOM = 0.35;
 export const MAX_ZOOM = 2.5;
-export const ZOOM_STEP = 0.1;
 
 // ---------------------------------------------------------------------------
 // Palm Rejection
@@ -117,48 +120,6 @@ export const PRESSURE_SMOOTHING = 0.5;
  * Spart Datenmenge und Rechenzeit, ohne dass man es sieht.
  */
 export const MIN_POINT_DISTANCE = 0.6;
-
-// ---------------------------------------------------------------------------
-// Undo / Redo
-// ---------------------------------------------------------------------------
-
-/** Maximale Anzahl Eintraege im Ink-Undo-Stack. */
-export const MAX_UNDO_DEPTH = 200;
-
-/**
- * ProseMirror fasst Tastatureingaben innerhalb dieses Fensters zu einem
- * Undo-Schritt zusammen (Default der History-Extension). Der gemeinsame
- * Undo-Router muss dieselbe Gruppierung nachbilden, sonst zaehlt er mehr
- * Text-Schritte als Tiptap tatsaechlich rueckgaengig machen kann.
- */
-export const TEXT_HISTORY_GROUP_MS = 500;
-
-// ---------------------------------------------------------------------------
-// Speichern
-// ---------------------------------------------------------------------------
-
-/** Wartezeit nach der letzten Aenderung, bevor in IndexedDB geschrieben wird. */
-export const AUTOSAVE_DEBOUNCE_MS = 1500;
-
-/** Obergrenze: spaetestens so oft wird gespeichert, auch bei Dauergekritzel. */
-export const AUTOSAVE_MAX_INTERVAL_MS = 10_000;
-
-// ---------------------------------------------------------------------------
-// Performance
-// ---------------------------------------------------------------------------
-
-/**
- * Seiten ausserhalb des Viewports bekommen kein Canvas zugewiesen, sondern
- * erst wenn sie sich bis auf diesen Abstand genaehert haben. Ohne das kostet
- * ein 20-Seiten-Dokument mit 3 Layern ueber 800 MB Canvas-Speicher.
- */
-export const PAGE_MOUNT_MARGIN_PX = 1200;
-
-/**
- * Weiche Obergrenze fuer Ink-Layer pro Seite. Kein hartes Limit, nur ein
- * Hinweis in der UI – jeder Layer kostet oben genannte ~14 MB pro Seite.
- */
-export const SOFT_LAYER_LIMIT = 8;
 
 // ---------------------------------------------------------------------------
 // Stift-Tasten

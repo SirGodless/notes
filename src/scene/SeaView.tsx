@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { PAGE_HEIGHT, V1_MIGRATION_PAGE_GAP } from '../config';
 import { isInputActive } from '../ink/inputActivity';
 import { PointerRouter } from '../ink/pointerRouter';
 import { createIslandManifest, createTextBox, type IslandManifest, type TextBox } from '../model/island';
+import { migrateV1ToV2 } from '../model/migrations';
 import type { Stroke, TextDoc } from '../model/types';
+import { importDocumentFromFile } from '../storage/fileIO';
 import {
   ETagConflictError,
   fetchIsland,
@@ -376,6 +379,42 @@ export function SeaView() {
       next.set(manifest.id, { manifest, etag, dirty: false, idPath: [manifest.id] });
       return next;
     });
+  }, []);
+
+  /**
+   * Stage F: eine aus v1 exportierte .json-Datei importieren (siehe
+   * storage/fileIO.ts, model/migrations.ts migrateV1ToV2). migrateV1ToV2
+   * selbst kennt nur relative Positionen (x=0, vertikal gestapelt ab y=0,
+   * siehe dort) – hier um die aktuelle Bildschirmmitte verschoben, damit
+   * die importierten Inseln sichtbar landen statt ggf. mit Insel 1 an (0,0)
+   * zu kollidieren.
+   */
+  const importV1File = useCallback(async (file: File) => {
+    let migratedIslands: IslandManifest[];
+    try {
+      const doc = await importDocumentFromFile(file);
+      migratedIslands = migrateV1ToV2(doc, PAGE_HEIGHT, V1_MIGRATION_PAGE_GAP);
+    } catch (error) {
+      setLoadError(`v1-Datei konnte nicht importiert werden: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+
+    const transform = panZoom.current!.getTransform();
+    const viewport = viewportRef.current?.getBoundingClientRect();
+    const screenCenterX = viewport ? viewport.width / 2 : 400;
+    const screenCenterY = viewport ? viewport.height / 2 : 300;
+    const originX = Math.round((screenCenterX - transform.x) / transform.zoom);
+    const originY = Math.round((screenCenterY - transform.y) / transform.zoom);
+
+    for (const manifest of migratedIslands) {
+      const shifted = { ...manifest, x: manifest.x + originX, y: manifest.y + originY };
+      const etag = await putIsland([shifted.id], shifted);
+      setIslands((current) => {
+        const next = new Map(current);
+        next.set(shifted.id, { manifest: shifted, etag, dirty: false, idPath: [shifted.id] });
+        return next;
+      });
+    }
   }, []);
 
   // -- Striche/Text entgegennehmen + debounced speichern -------------------
@@ -915,7 +954,12 @@ export function SeaView() {
   return (
     <SceneProvider value={sceneValue}>
       <div className="sea-app">
-        <Toolbar tool={tool} updateTool={updateTool} onAddIsland={() => void addIsland()} />
+        <Toolbar
+          tool={tool}
+          updateTool={updateTool}
+          onAddIsland={() => void addIsland()}
+          onImportV1File={(file) => void importV1File(file)}
+        />
 
         {loadError && <div className="sea-error">Arbeitsbereich konnte nicht geladen werden: {loadError}</div>}
 

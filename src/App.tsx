@@ -1,11 +1,11 @@
 import { SeaView } from './scene/SeaView';
 
 /**
- * Ab v2 (Stage B) ist die Szene (das Meer mit seinen Inseln) der
- * Haupteinstiegspunkt. v1s Seiten-Editor (state/AppState.tsx,
- * components/EditorContainer.tsx etc.) bleibt im Repo als Referenz liegen,
- * bis Stage F (Migration + Cutover) die alten Dateien entfernt – bis dahin
- * ist er ueber App.tsx nicht mehr erreichbar.
+ * Die Szene (das Meer mit seinen Inseln) ist der einzige Einstiegspunkt.
+ * v1s Seiten-Editor (state/, components/, storage/db.ts+autosave.ts,
+ * history/) ist seit Stage F (Migration + Cutover) komplett entfernt –
+ * eine bestehende v1-Exportdatei laesst sich ueber den Toolbar-Button
+ * "v1-Datei importieren" einlesen (siehe model/migrations.ts migrateV1ToV2).
  */
 export default function App() {
   return <SeaView />;

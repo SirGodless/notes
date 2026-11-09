@@ -1,28 +1,13 @@
 import { migrateDocument } from '../model/migrations';
 import type { NotesDocument } from '../model/types';
 
-/** Dateiname aus dem Titel ableiten, ohne im Dateisystem Aerger zu machen. */
-function toFileName(title: string): string {
-  const cleaned = title.trim().replace(/[^\p{L}\p{N} _-]/gu, '').replace(/\s+/g, '-');
-  return `${cleaned || 'notiz'}.json`;
-}
-
-export function exportDocument(doc: NotesDocument): void {
-  const payload = JSON.stringify({ ...doc, updatedAt: Date.now() }, null, 2);
-  const blob = new Blob([payload], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = toFileName(doc.title);
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-
-  // Erst im naechsten Tick freigeben – sonst bricht der Download in Firefox ab.
-  setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
+/**
+ * Liest eine v1-Exportdatei (.json) ein – genutzt vom v2-Import-Button
+ * (siehe scene/SeaView.tsx importV1File, model/migrations.ts migrateV1ToV2).
+ * v1s eigener exportDocument()-Download ist mit v1 selbst entfallen (Stage F
+ * Cutover) – v2 speichert laufend ins Backend, ein manueller Export ist dafuer
+ * nicht mehr noetig.
+ */
 export async function importDocumentFromFile(file: File): Promise<NotesDocument> {
   const text = await file.text();
 

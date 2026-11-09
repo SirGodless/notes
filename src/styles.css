@@ -518,6 +518,34 @@ body {
   border-color: var(--text);
 }
 
+/* Stage F: "v1-Datei importieren" – ein <label> statt <button>, damit das
+   eigentliche <input type="file"> (unsichtbar, siehe unten) per Klick auf
+   die sichtbare Flaeche geoeffnet wird, ohne eigenes JS dafuer zu brauchen. */
+.toolbar-file-button {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.toolbar-file-button:hover {
+  border-color: var(--accent);
+}
+
+.toolbar-file-button input[type='file'] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+}
+
 .sea-error {
   padding: 8px 12px;
   background: #fde8e8;

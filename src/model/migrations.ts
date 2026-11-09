@@ -1,5 +1,6 @@
 import { CURRENT_VERSION, type NotesDocument } from './types';
 import { createDocument, createEmptyTextDoc, createId } from './factory';
+import { createIslandManifest, createTextBox, type IslandManifest } from './island';
 
 /**
  * Migrationskette.
@@ -99,4 +100,59 @@ function isValidStroke(stroke: any): boolean {
     typeof stroke.width === 'number' &&
     (stroke.tool === 'pen' || stroke.tool === 'eraser')
   );
+}
+
+// ---------------------------------------------------------------------------
+// v1 -> v2 (Stage F): aus einem einzelnen v1-Dokument werden mehrere
+// Top-Level-Inseln im v2-Arbeitsbereich (siehe Plan, Abschnitt "Migration
+// von v1"). Bewusst eine reine Funktion ohne Netzwerkzugriff – das WEGSCHREIBEN
+// der entstandenen Inseln (putIsland pro Insel) ist Aufgabe des Aufrufers
+// (siehe scene/SeaView.tsx importV1File), damit diese Funktion isoliert
+// testbar bleibt und nicht wissen muss, WIE/WOHIN gespeichert wird.
+//
+// pageHeight/pageGap kommen als Parameter statt aus config.ts importiert zu
+// werden: dieses Modul (wie model/island.ts) hat bewusst KEINE Abhaengigkeit,
+// die DOM-Globals beruehrt (config.ts' getRenderScale() liest `window`) –
+// server/tsconfig.json prueft model/**/*.ts naemlich mit, und ein Import aus
+// config.ts wuerde dessen DOM-freien lib-Scope ("ES2022" ohne "DOM")
+// verletzen. Der Aufrufer (SeaView.tsx, reines Frontend) importiert
+// PAGE_HEIGHT/V1_MIGRATION_PAGE_GAP ganz normal aus config.ts.
+//
+// Jede v1-Page wird eine eigene Insel: ihr `text`-Feld wird zu GENAU EINER
+// TextBox mit snapToBaselineGrid=false (damit eine bestehende Notiz nicht
+// ungefragt neu umbricht – das globale Grundlinienraster ist eine v2-Neuheit,
+// keine rueckwirkende Anforderung an migrierte Inhalte), `layers` wird 1:1
+// uebernommen (identisches Schema, siehe model/types.ts). Die Inseln werden
+// vertikal gestapelt (x=0, y=pageIndex*(pageHeight+pageGap)) – dieselbe
+// Lesereihenfolge wie v1s Seiten-untereinander-Ansicht.
+// ---------------------------------------------------------------------------
+
+/**
+ * Wandelt ein (ggf. altes/rohes) v1-Dokument in eine Liste von v2-Insel-
+ * Manifesten um. Laeuft zuerst durch migrateDocument(), damit auch eine
+ * Datei aus einer noch frueheren v1-Unterversion funktioniert – dieselbe
+ * Garantie, die v1s eigener Datei-Import schon hatte (siehe
+ * storage/fileIO.ts importDocumentFromFile).
+ */
+export function migrateV1ToV2(raw: unknown, pageHeight: number, pageGap: number): IslandManifest[] {
+  const doc = migrateDocument(raw);
+
+  return doc.pages.map((page, pageIndex) => {
+    const pageLabel = doc.pages.length > 1 ? `${doc.title} (${pageIndex + 1}/${doc.pages.length})` : doc.title;
+
+    return createIslandManifest({
+      name: pageLabel,
+      x: 0,
+      y: pageIndex * (pageHeight + pageGap),
+      textBoxes: [
+        createTextBox({
+          x: 0,
+          y: 0,
+          snapToBaselineGrid: false,
+          content: page.text,
+        }),
+      ],
+      layers: page.layers,
+    });
+  });
 }
