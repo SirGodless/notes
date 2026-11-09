@@ -6,7 +6,7 @@ import {
   type Stroke,
   type StrokePoint,
   type ToolKind,
-} from './types';
+} from './types.ts';
 
 /** Kurze, kollisionsarme ID. crypto.randomUUID gibt es in allen Zielbrowsern. */
 export function createId(): string {

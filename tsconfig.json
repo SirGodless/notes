@@ -6,6 +6,10 @@
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
     "types": ["vite/client"],
+    // src/model/*.ts wird auch vom Node-Server importiert (server/), der
+    // explizite .ts-Endungen in Imports braucht (keine Bundler-Aufloesung
+    // zur Laufzeit). Erlaubt dieselben Dateien fuer Vite und Node gleichzeitig.
+    "allowImportingTsExtensions": true,
 
     "strict": true,
     "noUnusedLocals": true,

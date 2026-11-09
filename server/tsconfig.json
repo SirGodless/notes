@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    // Der Server laeuft ohne Build-Schritt direkt als .ts (Node 22s natives
+    // Type-Stripping) – die Importpfade im Quelltext sind deshalb die
+    // echten Laufzeitpfade und muessen .ts-Endungen tragen.
+    "allowImportingTsExtensions": true,
+
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["**/*.ts", "../src/model/**/*.ts"]
+}

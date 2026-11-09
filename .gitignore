@@ -3,3 +3,8 @@ dist
 .DS_Store
 *.local
 .vite
+
+# Lokaler Arbeitsbereich des Datei-API-Servers (echte Inseln als Ordner) –
+# docker-compose.yml mountet ihn als ./data, server:dev nutzt ./data-dev.
+/data
+/data-dev

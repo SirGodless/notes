@@ -1,10 +1,11 @@
 services:
   notes:
     build: .
-    # Feste Portzuordnung: erreichbar unter http://<server>:3000
     ports:
-      - "3000:80"
+      - "3000:3000"
     restart: unless-stopped
-    # Kein Volume, keine Datenbank, kein Backend: die App laeuft vollstaendig
-    # im Browser, und die Notizen liegen in der IndexedDB des jeweiligen
-    # Geraets. Der Container liefert nur statische Dateien aus.
+    volumes:
+      # Der Arbeitsbereich (alle Inseln als echte Ordner/island.json) lebt
+      # auf dem Host, nicht nur im Container – ueberlebt also ein
+      # `docker compose down` und laesst sich mit normalen Mitteln sichern.
+      - ./data:/app/workspace
