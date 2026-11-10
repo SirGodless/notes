@@ -8,3 +8,7 @@ dist
 # docker-compose.yml mountet ihn als ./data, server:dev nutzt ./data-dev.
 /data
 /data-dev
+
+# Echte Infrastruktur-Werte (z.B. Docker-Netzwerkname) – siehe .env.example
+# fuer die Vorlage mit Platzhalterwerten.
+.env

@@ -43,6 +43,7 @@ npm run server             # Datei-API ohne --watch, Arbeitsbereich unter ./data
 ## Mit Docker
 
 ```bash
+cp .env.example .env    # einmalig: CADDY_NETWORK_NAME auf den echten Netzwerknamen setzen
 docker compose up --build
 ```
 
@@ -50,6 +51,14 @@ Danach läuft die App auf http://localhost:3000. Ein einziger Node-Prozess
 liefert sowohl die gebauten statischen Dateien als auch die Datei-API – kein
 nginx mehr nötig, da derselbe Prozess beides bedient. `docker-compose.yml`
 mountet den Arbeitsbereich nach `./data`, damit er den Container überlebt.
+
+Der Container heißt stabil `notes-notes` (statt dem Compose-Standard
+`<projektordner>-notes-1`, der sich je nach Ordnername/Laufindex ändert) und
+hängt zusätzlich im externen Docker-Netz `CADDY_NETWORK_NAME` – das muss
+bereits existieren (vom Reverse-Proxy-Stack angelegt, z. B. Caddy), sonst
+kann der Proxy den Container unabhängig vom Namen gar nicht erreichen. Der
+echte Netzwerkname steht in `.env` (gitignored, siehe `.env.example`), nicht
+im Repo – das ist lokale Infrastruktur, keine Projekt-Konfiguration.
 
 ## Arbeitsbereich & Speichern
 

@@ -19,10 +19,13 @@ services:
       # Muss im selben Docker-Netz wie der Reverse Proxy (z.B. Caddy) haengen,
       # sonst kann der per Hostname gar nicht erst zu diesem Container
       # durchkommen – unabhaengig vom Namen (siehe container_name oben).
-      # "caddy_net" muss bereits existieren (vom Caddy-Stack angelegt);
-      # falls der Netzname bei dir anders heisst, hier anpassen.
       - caddy_net
 
 networks:
   caddy_net:
+    # Echter Name kommt aus .env (siehe .env.example) statt hier fest
+    # verdrahtet zu sein – der tatsaechliche Netzname ist lokale
+    # Infrastruktur-Information, die nicht ins Repo gehoert. Das Netz muss
+    # bereits existieren (vom Reverse-Proxy-Stack angelegt).
+    name: ${CADDY_NETWORK_NAME}
     external: true
