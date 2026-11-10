@@ -32,6 +32,15 @@ export interface IslandHitNode {
   screenToLocal(clientX: number, clientY: number): { x: number; y: number } | null;
   /** Wird vom zentralen Dispatcher (SeaView) auf dem Gewinner-Knoten aufgerufen. */
   handlePointerDown(event: PointerEvent): void;
+  /**
+   * Wie handlePointerDown, aber fuer einen BEREITS ALS TIPP BESTAETIGTEN
+   * Touch (siehe SeaView.tsx: ein Touch entscheidet sich erst beim
+   * Loslassen zwischen "Tippen" und "Ziehen/Pannen", anders als die Maus,
+   * wo button+down das sofort eindeutig sagt). Macht fuer Touch exakt das,
+   * was handlePointerDown fuer einen Maus-Linksklick sofort macht –
+   * Textbox erzeugen, wenn nicht schon auf einer vorhandenen.
+   */
+  handleTap(clientX: number, clientY: number, target: HTMLElement | null): void;
 }
 
 /**

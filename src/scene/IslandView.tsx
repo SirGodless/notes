@@ -296,6 +296,24 @@ export const IslandView = memo(function IslandView({ island, initialAutofocusTex
     };
   }, [router, toolRef, scene, island.id]);
 
+  /**
+   * Versucht, an (clientX,clientY) eine neue Textbox anzulegen – gemeinsame
+   * Logik fuer den Maus-Linksklick (sofort bei handlePointerDown) UND den
+   * bestaetigten Touch-Tipp (verzoegert, siehe handleTap/SeaView.tsx). Tut
+   * nichts, wenn der Punkt schon auf einer VORHANDENEN Textbox liegt – dort
+   * soll der native Klick/Tipp einfach den Cursor setzen, nicht eine neue
+   * Box darueberlegen.
+   */
+  const tryCreateTextBoxAt = (clientX: number, clientY: number, target: HTMLElement | null): boolean => {
+    if (target?.closest?.('.textbox')) return false;
+    const local = screenToLocal(clientX, clientY);
+    if (!local) return false;
+    const textBox = createTextBox({ x: Math.round(local.x), y: Math.round(local.y) });
+    pendingFocusIdRef.current = textBox.id;
+    scene.onCreateTextBox(island.id, textBox);
+    return true;
+  };
+
   // Bei der Ownership-Registry anmelden (siehe scene/ownership.ts).
   useEffect(() => {
     const node: IslandHitNode = {
@@ -331,26 +349,22 @@ export const IslandView = memo(function IslandView({ island, initialAutofocusTex
       handlePointerDown: (event) => {
         scene.onTouched(island.id);
 
-        // Maus-Klick in "auto"-Modus, der KEINE vorhandene Textbox trifft:
-        // Stift/Radiergummi zeichnen weiter wie gewohnt (ueber den
+        // Maus-LINKSKLICK in "auto"-Modus, der KEINE vorhandene Textbox
+        // trifft: Stift/Radiergummi zeichnen weiter wie gewohnt (ueber den
         // Controller), aber ein Klick ins offene Wasser INNERHALB der Insel
         // erzeugt eine neue Textbox dort – siehe Plan, Abschnitt
         // "Textboxen": "Entstehen, wo man zu tippen beginnt."
-        if (event.pointerType === 'mouse' && toolRef.current.mode === 'auto') {
-          const targetElement = event.target as HTMLElement | null;
-          const onExistingTextBox = targetElement?.closest?.('.textbox');
-          if (!onExistingTextBox) {
-            const local = screenToLocal(event.clientX, event.clientY);
-            if (local) {
-              const textBox = createTextBox({ x: Math.round(local.x), y: Math.round(local.y) });
-              pendingFocusIdRef.current = textBox.id;
-              scene.onCreateTextBox(island.id, textBox);
-              return;
-            }
-          }
+        // Touch entscheidet sich NICHT hier (sofort bei pointerdown), sondern
+        // erst bei einem bestaetigten Tipp – siehe handleTap unten.
+        if (event.pointerType === 'mouse' && event.button === 0 && toolRef.current.mode === 'auto') {
+          if (tryCreateTextBoxAt(event.clientX, event.clientY, event.target as HTMLElement | null)) return;
         }
 
         controllerRef.current?.handlePointerDown(event);
+      },
+      handleTap: (clientX, clientY, target) => {
+        scene.onTouched(island.id);
+        if (toolRef.current.mode === 'auto') tryCreateTextBoxAt(clientX, clientY, target);
       },
     };
     scene.registerIslandHitNode(node);
@@ -424,7 +438,10 @@ export const IslandView = memo(function IslandView({ island, initialAutofocusTex
           height={svgBounds.maxY - svgBounds.minY + svgMargin * 2}
           viewBox={`${svgBounds.minX - svgMargin} ${svgBounds.minY - svgMargin} ${svgBounds.maxX - svgBounds.minX + svgMargin * 2} ${svgBounds.maxY - svgBounds.minY + svgMargin * 2}`}
         >
-          <path d={svgPath} className="island-coastline-path" />
+          {/* fill via Pattern statt der CSS-Klasse (die nur den Fallback #fff
+              liefert, bevor das globale Pattern im DOM steht) – siehe
+              SeaView.tsx fuer die <pattern id="ruled-paper-pattern">-Definition. */}
+          <path d={svgPath} className="island-coastline-path" style={{ fill: 'url(#ruled-paper-pattern)' }} />
         </svg>
       )}
 

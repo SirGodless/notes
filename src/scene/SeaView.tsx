@@ -19,7 +19,9 @@ import {
   type TreeNode,
 } from '../storage/workspaceApi';
 import { applyGridRhythm } from './applyGridRhythm';
+import { getGridSpacing } from './baselineGrid';
 import { IslandView } from './IslandView';
+import { isPanTrigger, TAP_MAX_DURATION_MS, TAP_MAX_MOVEMENT_PX } from './inputBindings';
 import { resolveOwner, resolveOwnerExcluding, type IslandHitNode } from './ownership';
 import { PanZoomController, type SceneTransform } from './PanZoomController';
 import { SceneProvider, type SceneContextValue } from './SceneContext';
@@ -634,6 +636,25 @@ export function SeaView() {
   }
   const dragRef = useRef<DragState | null>(null);
 
+  // -- Touch-Tap-Erkennung (Handy/Tablet: Inhalt erzeugen per Tippen) -----
+  //
+  // Eine Maus weiss bei pointerdown sofort, was sie will (button 0 = Klick) –
+  // ein Touch nicht: dieselbe Beruehrung koennte
+  // ein Tipp (Inhalt erzeugen) oder der Beginn eines Zieh-Gestus (pannen)
+  // sein, das entscheidet sich erst beim Loslassen. Deshalb wird bei einem
+  // touch-pointerdown, der NICHT schon zum Zeichnen gefuehrt hat (siehe
+  // event.defaultPrevented-Check unten), nur ein Kandidat vermerkt; der
+  // tatsaechliche "Tipp"-Pfad (IslandHitNode.handleTap bzw. eine neue Insel
+  // in offenem Wasser) laeuft erst beim pointerup, wenn Dauer/Bewegung
+  // innerhalb der TAP_MAX_*-Grenzen blieben.
+  interface TapCandidate {
+    pointerId: number;
+    startClientX: number;
+    startClientY: number;
+    startTime: number;
+  }
+  const tapCandidateRef = useRef<TapCandidate | null>(null);
+
   const finishIslandDrag = useCallback(
     async (drag: DragState, clientX: number, clientY: number) => {
       // ERST flushen, DANN lesen: store.move()/eine Merge-PUT duerfen nicht
@@ -795,9 +816,19 @@ export function SeaView() {
     if (!viewport) return;
 
     const handleSceneDown = (event: PointerEvent) => {
+      // Pan-Taste (mittlere/rechte Maustaste, konfigurierbar siehe
+      // inputBindings.ts) hat Vorrang vor ALLEM anderen hier – weder
+      // Insel-Drag-Griff noch Zeichnen/Textbox-Erzeugung duerfen das
+      // abfangen, sonst gibt es keine Moeglichkeit mehr, die Szene per Maus
+      // zu bewegen (genau das war vorher der Fall: JEDE Maustaste im
+      // offenen Wasser erzeugte eine neue Insel). Ungehindert weiterlaufen
+      // lassen -> erreicht unten den Bubble-Phase-Pan-Handler.
+      if (isPanTrigger(event)) return;
+
       // Insel-Verschieben per Drag-Griff – hat Vorrang vor Zeichnen/Textbox-
-      // Erzeugung, unabhaengig vom gewaehlten Werkzeug.
-      if (event.pointerType === 'mouse') {
+      // Erzeugung, unabhaengig vom gewaehlten Werkzeug. Nur Linksklick (eine
+      // Pan-Taste kaeme hier wegen des obigen return() ohnehin nie an).
+      if (event.pointerType === 'mouse' && event.button === 0) {
         const labelEl = (event.target as HTMLElement).closest?.('.island-label') as HTMLElement | null;
         if (labelEl) {
           const islandEl = labelEl.closest('.island') as HTMLElement | null;
@@ -828,14 +859,42 @@ export function SeaView() {
       const winner = resolveOwner([...hitNodes.current.values()], event.clientX, event.clientY);
       if (winner) {
         winner.handlePointerDown(event);
+        // Touch entscheidet sich erst beim Loslassen zwischen Tippen und
+        // Ziehen (siehe Modul-Kommentar oben) – nur vermerken, wenn das
+        // Pointerdown NICHT bereits zum Zeichnen gefuehrt hat (sonst wuerde
+        // ein fertig gezeichneter Strich am Ende zusaetzlich noch als Tipp
+        // gewertet). handlePointerDown() ruft fuer "draw"/"swallow" synchron
+        // event.preventDefault() auf (siehe IslandInkController) – das laesst
+        // sich danach einfach abfragen.
+        if (event.pointerType === 'touch' && !event.defaultPrevented) {
+          tapCandidateRef.current = {
+            pointerId: event.pointerId,
+            startClientX: event.clientX,
+            startClientY: event.clientY,
+            startTime: event.timeStamp,
+          };
+        }
         return;
       }
 
-      // Keine Insel getroffen: ein Maus-Klick in "auto"-Modus auf offenem
-      // Meer legt eine neue Insel an (siehe createIslandWithTextBox).
-      // stopPropagation(), damit der Bubble-Phase-Pan-Handler (siehe
-      // onViewportPointerDown) aus demselben Klick keine Drag-Geste startet.
-      if (event.pointerType === 'mouse' && toolRef.current.mode === 'auto') {
+      // Keine Insel getroffen (offenes Wasser).
+      if (event.pointerType === 'touch') {
+        // Pannt erstmal normal weiter (Bubble-Phase-Handler unten) – die
+        // Tipp-Entscheidung (neue Insel anlegen) faellt erst bei pointerup.
+        tapCandidateRef.current = {
+          pointerId: event.pointerId,
+          startClientX: event.clientX,
+          startClientY: event.clientY,
+          startTime: event.timeStamp,
+        };
+        return;
+      }
+
+      // Maus-Linksklick in "auto"-Modus auf offenem Meer legt sofort eine
+      // neue Insel an (siehe createIslandWithTextBox). stopPropagation(),
+      // damit der Bubble-Phase-Pan-Handler (siehe onViewportPointerDown) aus
+      // demselben Klick keine Drag-Geste startet.
+      if (event.pointerType === 'mouse' && event.button === 0 && toolRef.current.mode === 'auto') {
         const rect = viewportRef.current?.getBoundingClientRect();
         if (!rect) return;
         const transform = panZoom.current!.getTransform();
@@ -849,6 +908,63 @@ export function SeaView() {
     viewport.addEventListener('pointerdown', handleSceneDown, { capture: true });
     return () => viewport.removeEventListener('pointerdown', handleSceneDown, { capture: true });
   }, [createIslandWithTextBox]);
+
+  // Touch-Tipp bestaetigen: erst jetzt (pointerup), nicht schon bei
+  // pointerdown, siehe Modul-Kommentar bei tapCandidateRef.
+  useEffect(() => {
+    const confirmOrCancelTap = (event: PointerEvent, confirm: boolean) => {
+      const candidate = tapCandidateRef.current;
+      if (!candidate || candidate.pointerId !== event.pointerId) return;
+      tapCandidateRef.current = null;
+      if (!confirm) return;
+
+      const elapsed = event.timeStamp - candidate.startTime;
+      const movedPx = Math.hypot(event.clientX - candidate.startClientX, event.clientY - candidate.startClientY);
+      if (elapsed > TAP_MAX_DURATION_MS || movedPx > TAP_MAX_MOVEMENT_PX) return; // war ein Ziehen, keine Aktion
+
+      if (toolRef.current.mode !== 'auto') return; // Tippen erzeugt wie beim Linksklick nur im Auto-Modus Inhalt.
+
+      const winner = resolveOwner([...hitNodes.current.values()], event.clientX, event.clientY);
+      if (winner) {
+        winner.handleTap(event.clientX, event.clientY, event.target as HTMLElement | null);
+        return;
+      }
+
+      const rect = viewportRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const transform = panZoom.current!.getTransform();
+      const worldX = (event.clientX - rect.left - transform.x) / transform.zoom;
+      const worldY = (event.clientY - rect.top - transform.y) / transform.zoom;
+      void createIslandWithTextBox(worldX, worldY);
+    };
+
+    const handleUp = (event: PointerEvent) => confirmOrCancelTap(event, true);
+    const handleCancel = (event: PointerEvent) => confirmOrCancelTap(event, false);
+    window.addEventListener('pointerup', handleUp);
+    window.addEventListener('pointercancel', handleCancel);
+    return () => {
+      window.removeEventListener('pointerup', handleUp);
+      window.removeEventListener('pointercancel', handleCancel);
+    };
+  }, [createIslandWithTextBox]);
+
+  // Rechtsklick ist jetzt eine Pan-Taste (siehe isPanTrigger) – das native
+  // Kontextmenu wuerde sonst nach jedem Rechtsklick-Pan trotzdem aufklappen.
+  // Ausnahme: innerhalb einer Textbox bleibt das native Menu (Ausschneiden/
+  // Kopieren/Einfuegen) erhalten, sonst waere Textbearbeitung per Rechtsklick
+  // komplett verkruppelt.
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    const handleContextMenu = (event: MouseEvent) => {
+      if ((event.target as HTMLElement).closest?.('.textbox-content')) return;
+      event.preventDefault();
+    };
+
+    viewport.addEventListener('contextmenu', handleContextMenu);
+    return () => viewport.removeEventListener('contextmenu', handleContextMenu);
+  }, []);
 
   const onViewportPointerDown = useCallback((event: React.PointerEvent) => {
     // Nur Events, die KEINE Insel schon per stopPropagation() beansprucht
@@ -953,6 +1069,20 @@ export function SeaView() {
 
   return (
     <SceneProvider value={sceneValue}>
+      {/* Nur Defs, nichts Sichtbares – EINE globale Rasterlinien-Fuellung
+          statt pro Insel eine eigene (verhindert doppelte IDs im Dokument
+          UND stellt sicher, dass das Raster auf allen Inseln exakt gleich
+          ausgerichtet ist, wie es "globale Grundlinie" verlangt). Referenziert
+          von IslandView.tsx ueber fill: url(#ruled-paper-pattern). */}
+      <svg aria-hidden="true" style={{ position: 'absolute', width: 0, height: 0 }}>
+        <defs>
+          <pattern id="ruled-paper-pattern" patternUnits="userSpaceOnUse" width={8} height={getGridSpacing()}>
+            <rect width={8} height={getGridSpacing()} fill="#ffffff" />
+            <line x1={0} y1={getGridSpacing() - 0.5} x2={8} y2={getGridSpacing() - 0.5} stroke="#3a6ea5" strokeOpacity={0.14} strokeWidth={1} />
+          </pattern>
+        </defs>
+      </svg>
+
       <div className="sea-app">
         <Toolbar
           tool={tool}
