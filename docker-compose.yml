@@ -1,6 +1,12 @@
 services:
   notes:
     build: .
+    # Explizit gesetzt statt dem Compose-Standard "<projekt>-<dienst>-<index>"
+    # (z.B. "notes-notes-1") ueberlassen – ein Reverse Proxy (Caddy etc.), der
+    # per Hostname auf diesen Container zeigt, braucht einen STABILEN Namen,
+    # der sich nicht aendert, wenn der Projektordner mal anders heisst oder
+    # Compose die Laufindex-Nummer anders vergibt.
+    container_name: notes-notes
     ports:
       - "3000:3000"
     restart: unless-stopped
@@ -9,3 +15,14 @@ services:
       # auf dem Host, nicht nur im Container – ueberlebt also ein
       # `docker compose down` und laesst sich mit normalen Mitteln sichern.
       - ./data:/app/workspace
+    networks:
+      # Muss im selben Docker-Netz wie der Reverse Proxy (z.B. Caddy) haengen,
+      # sonst kann der per Hostname gar nicht erst zu diesem Container
+      # durchkommen – unabhaengig vom Namen (siehe container_name oben).
+      # "caddy_net" muss bereits existieren (vom Caddy-Stack angelegt);
+      # falls der Netzname bei dir anders heisst, hier anpassen.
+      - caddy_net
+
+networks:
+  caddy_net:
+    external: true
